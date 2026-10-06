@@ -2,6 +2,7 @@ import { FastifyPluginAsync } from 'fastify';
 import { store } from '../services/store.service.js';
 import { geminiService } from '../services/gemini.service.js';
 import { prisma } from '../db/prisma.js';
+import { jobCollector } from '../services/collector/job-collector.service.js';
 
 export const jobRoutes: FastifyPluginAsync = async (fastify) => {
   // GET /api/v1/jobs
@@ -135,13 +136,19 @@ export const jobRoutes: FastifyPluginAsync = async (fastify) => {
     };
   });
 
-  // POST /api/v1/jobs/collect
-  fastify.post('/jobs/collect', async () => {
-    return {
-      taskId: `task_collect_${Date.now()}`,
-      status: 'completed',
-      message: 'Recherche synchronisée avec succès. Nouvelles offres indexées.'
-    };
+  // POST /api/v1/jobs/collect (Collecte automatique et déduplication)
+  fastify.post('/jobs/collect', async (_request, reply) => {
+    try {
+      const result = await jobCollector.runCollection();
+      return {
+        message: `Collecte terminée : ${result.newOffersSaved} nouvelle(s) offre(s) indexée(s), ${result.duplicatesSkipped} doublon(s) ignoré(s).${result.failedSources.length ? ` Sources indisponibles : ${result.failedSources.join(', ')}.` : ''}`,
+        result
+      };
+    } catch (err) {
+      return reply.status(500).send({
+        error: `Erreur lors de la collecte : ${err instanceof Error ? err.message : 'Erreur inconnue'}`
+      });
+    }
   });
 
   // POST /api/v1/jobs/:id/analyze (Ré-analyse)
