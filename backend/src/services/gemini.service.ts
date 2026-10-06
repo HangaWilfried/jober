@@ -177,8 +177,96 @@ CONSIGNES STRICTES :
       return parsed;
     } catch (err: any) {
       console.error('Erreur lors de l appel Gemini API:', err);
-      // En cas de problème d'API, on bascule sur l'analyse locale
       return this.fallbackLocalAnalysis(params);
+    }
+  }
+
+  /**
+   * Régénère une lettre de motivation avec des consignes ou un ton spécifique
+   */
+  async regenerateCoverLetter(params: {
+    jobTitle: string;
+    company: string;
+    jobDescription: string;
+    userProfile: { fullName: string; headline: string; skills: string[] };
+    cvText: string;
+    instructions?: string;
+    tone?: string;
+  }): Promise<string> {
+    const client = this.getClient();
+
+    if (!client) {
+      return `Madame, Monsieur,\n\nC'est avec un grand intérêt que je vous transmets ma candidature pour le poste de ${params.jobTitle} chez ${params.company}.\n\nFort de mon expertise sur ${params.userProfile.skills.slice(0, 3).join(', ')}, je saurai apporter une contribution immédiate à vos projets.\n\nCordialement,\n${params.userProfile.fullName}`;
+    }
+
+    try {
+      const prompt = `
+Rédige une lettre de motivation professionnelle en français pour le poste suivant :
+Poste : ${params.jobTitle}
+Entreprise : ${params.company}
+Description du poste :
+${params.jobDescription}
+
+Candidat :
+Nom : ${params.userProfile.fullName}
+Titre : ${params.userProfile.headline}
+Compétences : ${params.userProfile.skills.join(', ')}
+CV :
+${params.cvText}
+
+Consignes supplémentaires :
+- Ton souhaité : ${params.tone || 'Professionnel, dynamique et percutant'}
+- Instructions spécifiques de l'utilisateur : ${params.instructions || 'Mettre en valeur les réalisations concrètes et la valeur ajoutée apportée.'}
+- Sois concis (3 à 4 paragraphes percutants). Évite les formules plates et clichées.
+`;
+
+      const response = await client.models.generateContent({
+        model: 'gemini-2.5-flash',
+        contents: prompt
+      });
+
+      return response.text || 'Erreur lors de la génération de la lettre.';
+    } catch (err: any) {
+      console.error('Erreur régénération lettre Gemini:', err);
+      return `Madame, Monsieur,\n\nJe vous adresse ma candidature pour le poste de ${params.jobTitle} au sein de ${params.company}.\n\nCordialement,\n${params.userProfile.fullName}`;
+    }
+  }
+
+  /**
+   * Suggère une réponse assistée par l'IA à une question bloquante du recruteur
+   */
+  async generateSuggestedAnswer(params: {
+    question: string;
+    jobTitle: string;
+    company: string;
+    userProfile: { fullName: string; headline: string; skills: string[] };
+    cvText: string;
+  }): Promise<string> {
+    const client = this.getClient();
+
+    if (!client) {
+      return `Je souhaite rejoindre ${params.company} pour apporter mes compétences sur ${params.userProfile.skills.slice(0, 2).join(', ')} et participer activement au développement de vos projets.`;
+    }
+
+    try {
+      const prompt = `
+Tu es l'assistant de candidature du candidat ${params.userProfile.fullName} (${params.userProfile.headline}).
+Un formulaire de recrutement pour le poste de "${params.jobTitle}" chez "${params.company}" pose la question suivante :
+"${params.question}"
+
+Propose une réponse percutante, sincère et adaptée (en français, 2 à 4 phrases max), basée sur les compétences du candidat (${params.userProfile.skills.join(', ')}) et son CV :
+${params.cvText}
+`;
+
+      const response = await client.models.generateContent({
+        model: 'gemini-2.5-flash',
+        contents: prompt
+      });
+
+      return response.text?.trim() || '';
+    } catch (err: any) {
+      console.error('Erreur suggestion réponse Gemini:', err);
+      return `Mon profil et mon expérience sur ${params.userProfile.skills.slice(0, 2).join(', ')} s alignent étroitement avec les objectifs de ${params.company}.`;
     }
   }
 

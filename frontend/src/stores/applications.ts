@@ -5,6 +5,8 @@ import type { Application } from '../types';
 export const useApplicationsStore = defineStore('applications', () => {
   const currentApplication = ref<Application | null>(null);
   const loading = ref(false);
+  const regenerating = ref(false);
+  const suggestingAnswer = ref<Record<string, boolean>>({});
   const submitting = ref(false);
   const error = ref<string | null>(null);
   const successMessage = ref<string | null>(null);
@@ -37,9 +39,54 @@ export const useApplicationsStore = defineStore('applications', () => {
       });
       if (res.ok) {
         currentApplication.value = await res.json();
+        successMessage.value = 'Lettre de motivation mise à jour.';
       }
     } catch (err: any) {
       error.value = err.message;
+    }
+  }
+
+  async function regenerateCoverLetter(id: string, instructions?: string, tone?: string) {
+    regenerating.value = true;
+    error.value = null;
+    try {
+      const res = await fetch(`/api/v1/applications/${id}/regenerate-letter`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ instructions, tone })
+      });
+
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Erreur lors de la régénération');
+
+      currentApplication.value = data.application;
+      successMessage.value = 'Lettre de motivation réécrite par l IA avec succès !';
+      return data.coverLetter;
+    } catch (err: any) {
+      error.value = err.message;
+      return null;
+    } finally {
+      regenerating.value = false;
+    }
+  }
+
+  async function getSuggestedAnswer(appId: string, blockerId: string): Promise<string | null> {
+    suggestingAnswer.value[blockerId] = true;
+    try {
+      const res = await fetch(`/api/v1/applications/${appId}/suggest-blocker-answer`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ blockerId })
+      });
+
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Erreur lors de la suggestion');
+      return data.suggestedAnswer;
+    } catch (err: any) {
+      error.value = err.message;
+      return null;
+    } finally {
+      suggestingAnswer.value[blockerId] = false;
     }
   }
 
@@ -83,13 +130,16 @@ export const useApplicationsStore = defineStore('applications', () => {
   return {
     currentApplication,
     loading,
+    regenerating,
+    suggestingAnswer,
     submitting,
     error,
     successMessage,
     fetchApplication,
     updateCoverLetter,
+    regenerateCoverLetter,
+    getSuggestedAnswer,
     resolveBlocker,
     submitApplication
   };
 });
-

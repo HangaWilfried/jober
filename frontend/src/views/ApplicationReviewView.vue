@@ -11,13 +11,22 @@ import {
   MessageSquare,
   Sparkles,
   ShieldAlert,
-  Save
+  Save,
+  Wand2,
+  Copy,
+  Check,
+  Loader2,
+  X
 } from 'lucide-vue-next';
 
 const route = useRoute();
 const appStore = useApplicationsStore();
 const blockerResponses = ref<Record<string, string>>({});
 const coverLetterDraft = ref('');
+const showRegenModal = ref(false);
+const regenTone = ref('Professionnel, dynamique et percutant');
+const regenInstructions = ref('');
+const copiedNotification = ref(false);
 
 const applicationId = computed(() => route.params.id as string);
 const app = computed(() => appStore.currentApplication);
@@ -49,8 +58,49 @@ async function handleResolveBlocker(blockerId: string) {
   await appStore.resolveBlocker(applicationId.value, blockerId, answer);
 }
 
+async function handleSuggestBlockerAnswer(blockerId: string) {
+  const suggested = await appStore.getSuggestedAnswer(applicationId.value, blockerId);
+  if (suggested) {
+    blockerResponses.value[blockerId] = suggested;
+  }
+}
+
 async function handleSaveCoverLetter() {
   await appStore.updateCoverLetter(applicationId.value, coverLetterDraft.value);
+}
+
+async function handleRegenerateCoverLetter() {
+  const newLetter = await appStore.regenerateCoverLetter(
+    applicationId.value,
+    regenInstructions.value,
+    regenTone.value
+  );
+  if (newLetter) {
+    coverLetterDraft.value = newLetter;
+    showRegenModal.value = false;
+  }
+}
+
+async function handleCopyFullApplication() {
+  if (!app.value) return;
+
+  const content = `=== CANDIDATURE : ${app.value.jobTitle} chez ${app.value.company} ===
+
+--- LETTRE DE MOTIVATION ---
+${coverLetterDraft.value}
+
+--- RÉPONSES AUX QUESTIONS ---
+${app.value.preparedData.preparedAnswers.map(qa => `Q: ${qa.question}\nR: ${qa.suggestedAnswer}`).join('\n\n')}
+
+--- POINTS FORTS DU PROFIL ---
+${app.value.preparedData.customizedHighlights.join('\n')}
+`;
+
+  await navigator.clipboard.writeText(content);
+  copiedNotification.value = true;
+  setTimeout(() => {
+    copiedNotification.value = false;
+  }, 2500);
 }
 
 async function handleSubmitApplication() {
@@ -60,14 +110,25 @@ async function handleSubmitApplication() {
 
 <template>
   <div class="space-y-6 max-w-6xl mx-auto pb-16">
-    <!-- Navigation Back -->
-    <RouterLink
-      to="/"
-      class="inline-flex items-center gap-2 text-xs font-medium text-slate-400 hover:text-white transition-colors"
-    >
-      <ArrowLeft class="w-4 h-4" />
-      <span>Retour à la liste des offres</span>
-    </RouterLink>
+    <!-- Navigation Back & Quick Actions -->
+    <div class="flex items-center justify-between">
+      <RouterLink
+        to="/"
+        class="inline-flex items-center gap-2 text-xs font-medium text-slate-400 hover:text-white transition-colors"
+      >
+        <ArrowLeft class="w-4 h-4" />
+        <span>Retour à la liste des offres</span>
+      </RouterLink>
+
+      <button
+        @click="handleCopyFullApplication"
+        class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-xs font-medium text-slate-200 border border-slate-700 transition-colors cursor-pointer"
+      >
+        <Check v-if="copiedNotification" class="w-3.5 h-3.5 text-emerald-400" />
+        <Copy v-else class="w-3.5 h-3.5 text-slate-400" />
+        <span>{{ copiedNotification ? 'Dossier copié !' : 'Copier tout le dossier' }}</span>
+      </button>
+    </div>
 
     <!-- Loading State -->
     <div v-if="appStore.loading" class="text-center py-20 text-slate-400 text-sm">
@@ -106,8 +167,8 @@ async function handleSubmitApplication() {
       >
         <CheckCircle class="w-5 h-5 flex-shrink-0" />
         <div>
-          <p class="font-semibold">Candidature transmise avec succès !</p>
-          <p class="text-xs">Statut : {{ app.status }} — Enregistré le {{ new Date(app.submittedAt || Date.now()).toLocaleString('fr-FR') }}</p>
+          <p class="font-semibold">{{ appStore.successMessage || 'Candidature transmise avec succès !' }}</p>
+          <p class="text-xs">Statut : {{ app.status }} — Enregistré en base SQLite</p>
         </div>
       </div>
 
@@ -152,12 +213,27 @@ async function handleSubmitApplication() {
 
                 <!-- Input if not resolved -->
                 <div v-if="!blocker.resolved" class="space-y-3 mt-3">
+                  <div class="flex items-center justify-between">
+                    <span class="text-[11px] text-slate-400">Votre réponse pour ce recruteur :</span>
+                    <button
+                      type="button"
+                      @click="handleSuggestBlockerAnswer(blocker.id)"
+                      :disabled="appStore.suggestingAnswer[blocker.id]"
+                      class="inline-flex items-center gap-1.5 text-xs text-indigo-400 hover:text-indigo-300 transition-colors cursor-pointer"
+                    >
+                      <Loader2 v-if="appStore.suggestingAnswer[blocker.id]" class="w-3.5 h-3.5 animate-spin" />
+                      <Wand2 v-else class="w-3.5 h-3.5" />
+                      <span>Suggérer avec l'IA</span>
+                    </button>
+                  </div>
+
                   <textarea
                     v-model="blockerResponses[blocker.id]"
-                    rows="2"
-                    placeholder="Saisissez votre réponse ici..."
-                    class="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-indigo-500"
+                    rows="3"
+                    placeholder="Saisissez votre réponse ici, ou cliquez sur 'Suggérer avec l'IA'..."
+                    class="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-indigo-500 leading-relaxed"
                   ></textarea>
+
                   <button
                     @click="handleResolveBlocker(blocker.id)"
                     class="text-xs font-semibold px-3 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white transition-colors cursor-pointer"
@@ -215,7 +291,7 @@ async function handleSubmitApplication() {
                 <p class="text-xs font-semibold text-white">
                   {{ app.preparedData.selectedResume?.name || 'CV par défaut' }}
                 </p>
-                <p class="text-[10px] text-slate-500">Sélectionné automatiquement pour ce type de poste</p>
+                <p class="text-[10px] text-slate-500">Sélectionné automatiquement depuis SQLite</p>
               </div>
               <span class="text-[10px] font-semibold px-2 py-0.5 rounded bg-indigo-500/10 text-indigo-400 border border-indigo-500/20">
                 Adapté
@@ -233,20 +309,32 @@ async function handleSubmitApplication() {
             </div>
           </div>
 
-          <!-- Lettre de motivation éditable -->
+          <!-- Lettre de motivation éditable avec Assistant IA -->
           <div class="bg-slate-900 border border-slate-800 rounded-xl p-5 space-y-3">
             <div class="flex items-center justify-between">
               <h2 class="text-base font-semibold text-white flex items-center gap-2">
                 <Sparkles class="w-5 h-5 text-purple-400" />
-                <span>Lettre de motivation adaptée</span>
+                <span>Lettre de motivation</span>
               </h2>
-              <button
-                @click="handleSaveCoverLetter"
-                class="inline-flex items-center gap-1.5 text-xs font-medium px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 transition-colors cursor-pointer"
-              >
-                <Save class="w-3.5 h-3.5" />
-                <span>Sauvegarder</span>
-              </button>
+
+              <div class="flex items-center gap-2">
+                <button
+                  type="button"
+                  @click="showRegenModal = true"
+                  class="inline-flex items-center gap-1.5 text-xs font-medium px-2.5 py-1 rounded-lg bg-purple-500/10 hover:bg-purple-500/20 text-purple-300 border border-purple-500/20 transition-colors cursor-pointer"
+                >
+                  <Wand2 class="w-3.5 h-3.5" />
+                  <span>Ajuster avec l'IA</span>
+                </button>
+
+                <button
+                  @click="handleSaveCoverLetter"
+                  class="inline-flex items-center gap-1.5 text-xs font-medium px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 transition-colors cursor-pointer"
+                >
+                  <Save class="w-3.5 h-3.5" />
+                  <span>Sauvegarder</span>
+                </button>
+              </div>
             </div>
 
             <p class="text-xs text-slate-400">
@@ -255,7 +343,7 @@ async function handleSubmitApplication() {
 
             <textarea
               v-model="coverLetterDraft"
-              rows="12"
+              rows="13"
               class="w-full bg-slate-950 border border-slate-800 rounded-lg p-3 text-xs text-slate-200 leading-relaxed focus:outline-none focus:border-indigo-500"
             ></textarea>
           </div>
@@ -285,6 +373,72 @@ async function handleSubmitApplication() {
           <Send class="w-4 h-4" />
           <span>{{ appStore.submitting ? 'Transmission en cours...' : 'Valider et Transmettre la candidature' }}</span>
         </button>
+      </div>
+    </div>
+
+    <!-- Modal d'ajustement IA de la lettre -->
+    <div
+      v-if="showRegenModal"
+      class="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4"
+    >
+      <div class="bg-slate-900 border border-slate-800 rounded-2xl max-w-lg w-full p-6 shadow-2xl space-y-4">
+        <div class="flex items-center justify-between border-b border-slate-800 pb-3">
+          <h3 class="text-base font-bold text-white flex items-center gap-2">
+            <Wand2 class="w-5 h-5 text-purple-400" />
+            <span>Ajuster la lettre de motivation avec l'IA</span>
+          </h3>
+          <button @click="showRegenModal = false" class="text-slate-400 hover:text-white">
+            <X class="w-5 h-5" />
+          </button>
+        </div>
+
+        <div class="space-y-3">
+          <div>
+            <label class="block text-xs font-semibold text-slate-300 mb-1">Ton souhaité</label>
+            <select
+              v-model="regenTone"
+              class="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs text-white focus:outline-none focus:border-indigo-500"
+            >
+              <option value="Professionnel, dynamique et percutant">Dynamique & Percutant (Recommandé)</option>
+              <option value="Très concis et axé sur les résultats chiffrés">Très concis (Bullet points & impact)</option>
+              <option value="Formel et institutionnel">Formel & Corporatif</option>
+              <option value="Créatif et passionné">Passionné & Visionnaire</option>
+            </select>
+          </div>
+
+          <div>
+            <label class="block text-xs font-semibold text-slate-300 mb-1">
+              Instructions spécifiques (optionnel)
+            </label>
+            <textarea
+              v-model="regenInstructions"
+              rows="3"
+              placeholder="ex: Insister sur mon expérience en refonte d'architecture, mentionner ma disponibilité sous 15 jours..."
+              class="w-full bg-slate-950 border border-slate-800 rounded-lg p-2.5 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-indigo-500"
+            ></textarea>
+          </div>
+        </div>
+
+        <div class="flex items-center justify-end gap-3 pt-3 border-t border-slate-800">
+          <button
+            type="button"
+            @click="showRegenModal = false"
+            class="px-3 py-1.5 text-xs text-slate-400 hover:text-white rounded-lg hover:bg-slate-800"
+          >
+            Annuler
+          </button>
+
+          <button
+            type="button"
+            @click="handleRegenerateCoverLetter"
+            :disabled="appStore.regenerating"
+            class="inline-flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-semibold text-white bg-purple-600 hover:bg-purple-500 disabled:opacity-50 transition-all cursor-pointer"
+          >
+            <Loader2 v-if="appStore.regenerating" class="w-4 h-4 animate-spin" />
+            <Sparkles v-else class="w-4 h-4" />
+            <span>{{ appStore.regenerating ? 'Réécriture IA...' : 'Régénérer la lettre' }}</span>
+          </button>
+        </div>
       </div>
     </div>
   </div>
