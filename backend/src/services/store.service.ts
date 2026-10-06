@@ -1,271 +1,302 @@
-import { UserProfile, JobOffer, Application } from '../types/index.js';
+import { prisma } from '../db/prisma.js';
+import type { UserProfile, JobOffer, Application } from '../types/index.js';
 
-class DataStore {
-  private profile: UserProfile = {
-    id: 'usr_me',
-    fullName: 'Alexandre Dev',
-    email: 'alexandre.dev@example.com',
-    phone: '+33 6 12 34 56 78',
-    headline: 'Développeur Fullstack (Vue.js / Node.js)',
-    location: 'Paris, France',
-    skills: ['Vue.js', 'Vue 3', 'TypeScript', 'Node.js', 'Fastify', 'Tailwind CSS', 'Docker', 'Git', 'REST API'],
-    searchPreferences: {
-      targetTitles: ['Développeur Fullstack', 'Frontend Engineer Vue.js', 'Tech Lead Frontend'],
-      remote: 'hybrid',
-      minSalary: 55000,
-      locations: ['Paris', 'Île-de-France', 'Télétravail'],
-      excludedCompanies: []
-    },
-    resumes: [
-      {
-        id: 'res_01',
-        name: 'CV_Alexandre_Fullstack_2026.pdf',
-        isPrimary: true,
-        updatedAt: '2026-10-01T08:00:00Z'
-      },
-      {
-        id: 'res_02',
-        name: 'CV_Alexandre_LeadVue_2026.pdf',
-        isPrimary: false,
-        updatedAt: '2026-09-20T14:30:00Z'
-      }
-    ]
-  };
+export class DatabaseService {
+  // ========================
+  // 1. Profil Utilisateur
+  // ========================
+  async getProfile(): Promise<UserProfile | null> {
+    const p = await prisma.userProfile.findFirst({
+      include: { resumes: true }
+    });
 
-  private jobs: JobOffer[] = [
-    {
-      id: 'job_01',
-      title: 'Senior Fullstack Engineer (Vue 3 / Node.js)',
-      company: 'Novatech Labs',
-      location: 'Paris (2 jours présentiel / 3 jours télétravail)',
-      remoteType: 'hybrid',
-      url: 'https://example.com/jobs/novatech-fullstack',
-      source: 'Welcome to the Jungle',
-      description: 'Nous recherchons un développeur Fullstack expérimenté maîtrisant Vue 3 (Composition API) et Node.js/TypeScript pour concevoir nos nouveaux outils métiers internes.',
-      publishedAt: '2026-10-05T10:15:00Z',
-      status: 'analyzed',
-      analysis: {
-        matchScore: 94,
-        summary: 'Excellente adéquation technique et organisationnelle. Stack 100% alignée (Vue 3, TypeScript, Node.js). Télétravail hybride conforme aux critères.',
-        requiredSkills: ['Vue.js', 'TypeScript', 'Node.js', 'REST API'],
-        matchingSkills: ['Vue.js', 'TypeScript', 'Node.js', 'REST API'],
-        missingSkills: [],
-        minExperienceYears: 4
-      },
-      applicationId: 'app_01'
-    },
-    {
-      id: 'job_02',
-      title: 'Lead Frontend Vue.js',
-      company: 'DataFlow Systems',
-      location: 'Full Remote (France)',
-      remoteType: 'full',
-      url: 'https://example.com/jobs/dataflow-lead-vue',
-      source: 'LinkedIn',
-      description: 'Rejoignez notre équipe pour piloter la refonte de notre plateforme SaaS vers Vue 3, Pinia et Tailwind CSS.',
-      publishedAt: '2026-10-04T16:45:00Z',
-      status: 'analyzed',
-      analysis: {
-        matchScore: 88,
-        summary: 'Profil très pertinent sur Vue 3 et Pinia. Expérience d architecture requise.',
-        requiredSkills: ['Vue 3', 'Pinia', 'Tailwind CSS', 'Architecture Frontend'],
-        matchingSkills: ['Vue 3', 'Tailwind CSS'],
-        missingSkills: ['Architecture Frontend'],
-        minExperienceYears: 5
-      },
-      applicationId: 'app_02'
-    },
-    {
-      id: 'job_03',
-      title: 'Développeur Java / Angular Senior',
-      company: 'Legacy Corp',
-      location: 'La Défense',
-      remoteType: 'on-site',
-      url: 'https://example.com/jobs/legacy-java-angular',
-      source: 'Indeed',
-      description: 'Maintenance et migration de progiciels bancaires en Java Spring Boot et Angular 12.',
-      publishedAt: '2026-10-02T09:00:00Z',
-      status: 'rejected',
-      analysis: {
-        matchScore: 25,
-        summary: 'Non recommandé : compétences clés manquantes (Java, Spring Boot, Angular). Présentiel complet non souhaité.',
-        requiredSkills: ['Java', 'Spring Boot', 'Angular', 'Oracle DB'],
-        matchingSkills: [],
-        missingSkills: ['Java', 'Spring Boot', 'Angular', 'Oracle DB'],
-        minExperienceYears: 6
-      }
-    }
-  ];
+    if (!p) return null;
 
-  private applications: Application[] = [
-    {
-      id: 'app_01',
-      jobId: 'job_01',
-      jobTitle: 'Senior Fullstack Engineer (Vue 3 / Node.js)',
-      company: 'Novatech Labs',
-      status: 'ready_for_review',
-      matchScore: 94,
-      readinessScore: 85,
-      preparedData: {
-        selectedResume: {
-          id: 'res_01',
-          name: 'CV_Alexandre_Fullstack_2026.pdf',
-          isPrimary: true,
-          updatedAt: '2026-10-01T08:00:00Z'
-        },
-        customizedHighlights: [
-          'Mise en valeur de 4 ans de projets en Vue 3 Composition API et TypeScript',
-          'Expérience pratique sur les architectures Node.js orientées performance'
-        ],
-        coverLetter: `Madame, Monsieur,\n\nC'est avec un grand enthousiasme que je vous adresse ma candidature pour le poste de Senior Fullstack Engineer au sein de Novatech Labs.\n\nFort de mon parcours sur l'écosystème Vue 3 et Node.js/TypeScript, j'ai développé une solide rigueur dans la conception d'applications réactives et maintenables. Vos projets d'outils métiers résonnent parfaitement avec mes réalisations récentes.\n\nRestant à votre entière disposition pour échanger de vive voix,\n\nAlexandre Dev`,
-        preparedAnswers: [
-          {
-            question: 'Quel est votre délai de préavis ?',
-            suggestedAnswer: '1 mois (négociable)',
-            confidence: 0.95,
-            isConfirmed: true
-          },
-          {
-            question: 'Vos prétentions salariales brutes annuelles ?',
-            suggestedAnswer: '58 000 €',
-            confidence: 0.9,
-            isConfirmed: false
-          }
-        ]
-      },
-      blockers: [
-        {
-          id: 'blk_01',
-          type: 'subjective_question',
-          question: 'Pourquoi souhaitez-vous rejoindre particulièrement Novatech Labs ?',
-          resolved: false,
-          userResponse: null
-        }
-      ],
-      submittedAt: null
-    },
-    {
-      id: 'app_02',
-      jobId: 'job_02',
-      jobTitle: 'Lead Frontend Vue.js',
-      company: 'DataFlow Systems',
-      status: 'prepared',
-      matchScore: 88,
-      readinessScore: 70,
-      preparedData: {
-        selectedResume: {
-          id: 'res_02',
-          name: 'CV_Alexandre_LeadVue_2026.pdf',
-          isPrimary: false,
-          updatedAt: '2026-09-20T14:30:00Z'
-        },
-        customizedHighlights: [
-          'Focus sur le design system avec Tailwind CSS et le state management Pinia'
-        ],
-        coverLetter: `Madame, Monsieur,\n\nIntéressé par votre projet de refonte vers Vue 3 et Pinia, je souhaite vous apporter mon expertise technique...`,
-        preparedAnswers: [
-          {
-            question: 'Avez-vous déjà mené une migration de framework ?',
-            suggestedAnswer: 'Oui, migration complète d un portail interne Vue 2 vers Vue 3.',
-            confidence: 0.85,
-            isConfirmed: false
-          }
-        ]
-      },
-      blockers: [
-        {
-          id: 'blk_02',
-          type: 'subjective_question',
-          question: 'Décrivez un défi d architecture complexe que vous avez résolu.',
-          resolved: false,
-          userResponse: null
-        }
-      ],
-      submittedAt: null
-    }
-  ];
-
-  // Profil
-  getProfile(): UserProfile {
-    return this.profile;
+    return {
+      id: p.id,
+      fullName: p.fullName,
+      email: p.email,
+      phone: p.phone,
+      headline: p.headline,
+      location: p.location,
+      skills: JSON.parse(p.skills || '[]'),
+      searchPreferences: JSON.parse(p.searchPreferences || '{}'),
+      resumes: p.resumes.map(r => ({
+        id: r.id,
+        name: r.name,
+        isPrimary: r.isPrimary,
+        updatedAt: r.updatedAt.toISOString()
+      }))
+    };
   }
 
-  updateProfile(update: Partial<UserProfile>): UserProfile {
-    this.profile = { ...this.profile, ...update };
-    return this.profile;
+  async updateProfile(updates: Partial<UserProfile>): Promise<UserProfile | null> {
+    const existing = await prisma.userProfile.findFirst();
+    if (!existing) return null;
+
+    const dataToUpdate: any = {};
+    if (updates.fullName !== undefined) dataToUpdate.fullName = updates.fullName;
+    if (updates.email !== undefined) dataToUpdate.email = updates.email;
+    if (updates.phone !== undefined) dataToUpdate.phone = updates.phone;
+    if (updates.headline !== undefined) dataToUpdate.headline = updates.headline;
+    if (updates.location !== undefined) dataToUpdate.location = updates.location;
+    if (updates.skills !== undefined) dataToUpdate.skills = JSON.stringify(updates.skills);
+    if (updates.searchPreferences !== undefined) {
+      dataToUpdate.searchPreferences = JSON.stringify(updates.searchPreferences);
+    }
+
+    await prisma.userProfile.update({
+      where: { id: existing.id },
+      data: dataToUpdate
+    });
+
+    return this.getProfile();
   }
 
-  // Offres
-  getJobs(filters?: { status?: string; minMatch?: number }): JobOffer[] {
-    let result = [...this.jobs];
-    if (filters?.status) {
-      result = result.filter(j => j.status === filters.status);
+  // ========================
+  // 2. Offres d'Emploi
+  // ========================
+  async getJobs(filters?: { status?: string; minMatch?: number }): Promise<JobOffer[]> {
+    const where: any = {};
+    if (filters?.status && filters.status !== 'all') {
+      where.status = filters.status;
     }
+
+    const offers = await prisma.jobOffer.findMany({
+      where,
+      include: {
+        analysis: true,
+        application: true
+      },
+      orderBy: { createdAt: 'desc' }
+    });
+
+    const formatted: JobOffer[] = offers.map(o => {
+      let analysis: any = undefined;
+      if (o.analysis) {
+        analysis = {
+          matchScore: o.analysis.matchScore,
+          summary: o.analysis.summary,
+          requiredSkills: JSON.parse(o.analysis.requiredSkills || '[]'),
+          matchingSkills: JSON.parse(o.analysis.matchingSkills || '[]'),
+          missingSkills: JSON.parse(o.analysis.missingSkills || '[]'),
+          minExperienceYears: o.analysis.minExperienceYears
+        };
+      }
+
+      return {
+        id: o.id,
+        title: o.title,
+        company: o.company,
+        location: o.location,
+        remoteType: o.remoteType as any,
+        url: o.url,
+        source: o.source,
+        description: o.description,
+        publishedAt: o.publishedAt.toISOString(),
+        status: o.status as any,
+        analysis,
+        applicationId: o.application?.id
+      };
+    });
+
     if (filters?.minMatch !== undefined) {
-      result = result.filter(j => (j.analysis?.matchScore ?? 0) >= filters.minMatch!);
+      return formatted.filter(j => (j.analysis?.matchScore ?? 0) >= filters.minMatch!);
     }
-    return result;
+
+    return formatted;
   }
 
-  getJobById(id: string): JobOffer | undefined {
-    return this.jobs.find(j => j.id === id);
-  }
+  async getJobById(id: string): Promise<JobOffer | null> {
+    const o = await prisma.jobOffer.findUnique({
+      where: { id },
+      include: {
+        analysis: true,
+        application: true
+      }
+    });
 
-  // Candidatures
-  getApplications(filters?: { status?: string }): Application[] {
-    let result = [...this.applications];
-    if (filters?.status) {
-      result = result.filter(a => a.status === filters.status);
+    if (!o) return null;
+
+    let analysis: any = undefined;
+    if (o.analysis) {
+      analysis = {
+        matchScore: o.analysis.matchScore,
+        summary: o.analysis.summary,
+        requiredSkills: JSON.parse(o.analysis.requiredSkills || '[]'),
+        matchingSkills: JSON.parse(o.analysis.matchingSkills || '[]'),
+        missingSkills: JSON.parse(o.analysis.missingSkills || '[]'),
+        minExperienceYears: o.analysis.minExperienceYears
+      };
     }
-    return result;
+
+    return {
+      id: o.id,
+      title: o.title,
+      company: o.company,
+      location: o.location,
+      remoteType: o.remoteType as any,
+      url: o.url,
+      source: o.source,
+      description: o.description,
+      publishedAt: o.publishedAt.toISOString(),
+      status: o.status as any,
+      analysis,
+      applicationId: o.application?.id
+    };
   }
 
-  getApplicationById(id: string): Application | undefined {
-    return this.applications.find(a => a.id === id);
+  // ========================
+  // 3. Candidatures
+  // ========================
+  async getApplications(filters?: { status?: string }): Promise<Application[]> {
+    const where: any = {};
+    if (filters?.status && filters.status !== 'all') {
+      where.status = filters.status;
+    }
+
+    const apps = await prisma.application.findMany({
+      where,
+      include: {
+        job: true,
+        blockers: true
+      },
+      orderBy: { createdAt: 'desc' }
+    });
+
+    return Promise.all(apps.map(a => this.formatApplication(a)));
   }
 
-  updateApplication(id: string, updates: Partial<Application>): Application | undefined {
-    const appIndex = this.applications.findIndex(a => a.id === id);
-    if (appIndex === -1) return undefined;
+  async getApplicationById(id: string): Promise<Application | null> {
+    const a = await prisma.application.findUnique({
+      where: { id },
+      include: {
+        job: true,
+        blockers: true
+      }
+    });
 
-    const current = this.applications[appIndex];
-    const updated = { ...current, ...updates };
+    if (!a) return null;
+    return this.formatApplication(a);
+  }
 
-    // Si tous les bloqueurs sont résolus, on augmente la readiness
-    const hasUnresolvedBlockers = updated.blockers.some(b => !b.resolved);
-    if (!hasUnresolvedBlockers && updated.readinessScore < 100) {
-      updated.readinessScore = 100;
-      if (updated.status === 'ready_for_review') {
-        updated.status = 'ready_to_submit';
+  private async formatApplication(a: any): Promise<Application> {
+    let selectedResume: any = undefined;
+    if (a.selectedResumeId) {
+      const resume = await prisma.resume.findUnique({ where: { id: a.selectedResumeId } });
+      if (resume) {
+        selectedResume = {
+          id: resume.id,
+          name: resume.name,
+          isPrimary: resume.isPrimary,
+          updatedAt: resume.updatedAt.toISOString()
+        };
+      }
+    } else {
+      const primaryResume = await prisma.resume.findFirst({ where: { isPrimary: true } });
+      if (primaryResume) {
+        selectedResume = {
+          id: primaryResume.id,
+          name: primaryResume.name,
+          isPrimary: primaryResume.isPrimary,
+          updatedAt: primaryResume.updatedAt.toISOString()
+        };
       }
     }
 
-    this.applications[appIndex] = updated;
-    return updated;
+    return {
+      id: a.id,
+      jobId: a.jobId,
+      jobTitle: a.job.title,
+      company: a.job.company,
+      status: a.status as any,
+      matchScore: a.matchScore,
+      readinessScore: a.readinessScore,
+      preparedData: {
+        selectedResume,
+        customizedHighlights: JSON.parse(a.customizedHighlights || '[]'),
+        coverLetter: a.coverLetter,
+        preparedAnswers: JSON.parse(a.preparedAnswers || '[]')
+      },
+      blockers: a.blockers.map((b: any) => ({
+        id: b.id,
+        type: b.type,
+        question: b.question,
+        resolved: b.resolved,
+        userResponse: b.userResponse
+      })),
+      submittedAt: a.submittedAt ? a.submittedAt.toISOString() : null
+    };
   }
 
-  resolveBlocker(appId: string, blockerId: string, response: string): Application | undefined {
-    const app = this.getApplicationById(appId);
-    if (!app) return undefined;
+  async updateApplication(id: string, updates: any): Promise<Application | null> {
+    const current = await prisma.application.findUnique({
+      where: { id },
+      include: { blockers: true }
+    });
+    if (!current) return null;
 
-    const blocker = app.blockers.find(b => b.id === blockerId);
-    if (blocker) {
-      blocker.resolved = true;
-      blocker.userResponse = response;
+    const data: any = {};
+    if (updates.status !== undefined) data.status = updates.status;
+    if (updates.preparedData?.coverLetter !== undefined) {
+      data.coverLetter = updates.preparedData.coverLetter;
+    }
+    if (updates.preparedData?.customizedHighlights !== undefined) {
+      data.customizedHighlights = JSON.stringify(updates.preparedData.customizedHighlights);
+    }
+    if (updates.preparedData?.preparedAnswers !== undefined) {
+      data.preparedAnswers = JSON.stringify(updates.preparedData.preparedAnswers);
     }
 
-    return this.updateApplication(appId, { blockers: app.blockers });
+    await prisma.application.update({
+      where: { id },
+      data
+    });
+
+    return this.getApplicationById(id);
   }
 
-  submitApplication(id: string): Application | undefined {
-    const app = this.getApplicationById(id);
-    if (!app) return undefined;
+  async resolveBlocker(appId: string, blockerId: string, response: string): Promise<Application | null> {
+    await prisma.applicationBlocker.update({
+      where: { id: blockerId },
+      data: {
+        resolved: true,
+        userResponse: response
+      }
+    });
 
-    app.status = 'submitted_manual';
-    app.submittedAt = new Date().toISOString();
-    return app;
+    // Vérifie s'il reste des bloqueurs non résolus
+    const remainingUnresolved = await prisma.applicationBlocker.count({
+      where: {
+        applicationId: appId,
+        resolved: false
+      }
+    });
+
+    if (remainingUnresolved === 0) {
+      await prisma.application.update({
+        where: { id: appId },
+        data: {
+          readinessScore: 100,
+          status: 'ready_to_submit'
+        }
+      });
+    }
+
+    return this.getApplicationById(appId);
+  }
+
+  async submitApplication(id: string): Promise<Application | null> {
+    await prisma.application.update({
+      where: { id },
+      data: {
+        status: 'submitted_manual',
+        submittedAt: new Date()
+      }
+    });
+
+    return this.getApplicationById(id);
   }
 }
 
-export const store = new DataStore();
-
+export const store = new DatabaseService();

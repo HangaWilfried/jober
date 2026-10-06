@@ -5,7 +5,7 @@ export const applicationRoutes: FastifyPluginAsync = async (fastify) => {
   // GET /api/v1/applications
   fastify.get('/applications', async (request) => {
     const query = request.query as { status?: string };
-    const data = store.getApplications({ status: query.status });
+    const data = await store.getApplications({ status: query.status });
     return {
       data,
       total: data.length
@@ -15,7 +15,7 @@ export const applicationRoutes: FastifyPluginAsync = async (fastify) => {
   // GET /api/v1/applications/:id
   fastify.get('/applications/:id', async (request, reply) => {
     const { id } = request.params as { id: string };
-    const app = store.getApplicationById(id);
+    const app = await store.getApplicationById(id);
     if (!app) {
       return reply.status(404).send({ error: 'Candidature non trouvée' });
     }
@@ -26,7 +26,7 @@ export const applicationRoutes: FastifyPluginAsync = async (fastify) => {
   fastify.patch('/applications/:id', async (request, reply) => {
     const { id } = request.params as { id: string };
     const body = request.body as Record<string, unknown>;
-    const updated = store.updateApplication(id, body);
+    const updated = await store.updateApplication(id, body);
     if (!updated) {
       return reply.status(404).send({ error: 'Candidature non trouvée' });
     }
@@ -37,7 +37,7 @@ export const applicationRoutes: FastifyPluginAsync = async (fastify) => {
   fastify.post('/applications/:id/resolve-blocker', async (request, reply) => {
     const { id } = request.params as { id: string };
     const { blockerId, response } = request.body as { blockerId: string; response: string };
-    const updated = store.resolveBlocker(id, blockerId, response);
+    const updated = await store.resolveBlocker(id, blockerId, response);
     if (!updated) {
       return reply.status(404).send({ error: 'Candidature ou bloqueur non trouvé' });
     }
@@ -50,7 +50,7 @@ export const applicationRoutes: FastifyPluginAsync = async (fastify) => {
   // POST /api/v1/applications/:id/submit
   fastify.post('/applications/:id/submit', async (request, reply) => {
     const { id } = request.params as { id: string };
-    const app = store.getApplicationById(id);
+    const app = await store.getApplicationById(id);
     if (!app) {
       return reply.status(404).send({ error: 'Candidature non trouvée' });
     }
@@ -64,11 +64,10 @@ export const applicationRoutes: FastifyPluginAsync = async (fastify) => {
       });
     }
 
-    const submitted = store.submitApplication(id);
+    const submitted = await store.submitApplication(id);
     return {
       message: 'Candidature transmise avec succès !',
       application: submitted
     };
   });
 };
-
