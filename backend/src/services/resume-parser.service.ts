@@ -100,3 +100,4 @@ export class ResumeParserService {
 }
 
 export const resumeParser = new ResumeParserService();
+

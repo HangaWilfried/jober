@@ -5,7 +5,9 @@ import type { JobOffer } from '../types';
 export const useJobsStore = defineStore('jobs', () => {
   const jobs = ref<JobOffer[]>([]);
   const loading = ref(false);
+  const analyzing = ref(false);
   const error = ref<string | null>(null);
+  const successMessage = ref<string | null>(null);
 
   // Filtres
   const filterMinMatch = ref<number>(0);
@@ -51,6 +53,40 @@ export const useJobsStore = defineStore('jobs', () => {
     }
   }
 
+  async function analyzeNewJob(payload: {
+    title: string;
+    company: string;
+    location?: string;
+    remoteType?: string;
+    url?: string;
+    description: string;
+  }): Promise<JobOffer | null> {
+    analyzing.value = true;
+    error.value = null;
+    successMessage.value = null;
+    try {
+      const res = await fetch('/api/v1/jobs/analyze-manual', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data.error || 'Erreur lors de l analyse de l offre');
+      }
+
+      successMessage.value = `Offre "${payload.title}" analysée avec succès ! (Match : ${data.job.analysis?.matchScore}%)`;
+      await fetchJobs();
+      return data.job;
+    } catch (err: any) {
+      error.value = err.message;
+      return null;
+    } finally {
+      analyzing.value = false;
+    }
+  }
+
   async function triggerCollect() {
     loading.value = true;
     try {
@@ -68,13 +104,15 @@ export const useJobsStore = defineStore('jobs', () => {
   return {
     jobs,
     loading,
+    analyzing,
     error,
+    successMessage,
     filterMinMatch,
     filterStatus,
     searchQuery,
     filteredJobs,
     fetchJobs,
+    analyzeNewJob,
     triggerCollect
   };
 });
-
