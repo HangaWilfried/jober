@@ -1,5 +1,6 @@
 import Fastify from 'fastify';
 import cors from '@fastify/cors';
+import multipart from '@fastify/multipart';
 import { profileRoutes } from './routes/profile.routes.js';
 import { jobRoutes } from './routes/jobs.routes.js';
 import { applicationRoutes } from './routes/applications.routes.js';
@@ -21,6 +22,13 @@ const fastify = Fastify({
 await fastify.register(cors, {
   origin: true,
   methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE']
+});
+
+// Support multipart pour l'upload de CVs (PDF)
+await fastify.register(multipart, {
+  limits: {
+    fileSize: 15 * 1024 * 1024 // 15 Mo max
+  }
 });
 
 // Route de santé

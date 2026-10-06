@@ -19,6 +19,10 @@ build/
 *.sqlite
 *.sqlite-journal
 
+# Uploads (CVs & documents)
+uploads/
+backend/uploads/
+
 # Logs
 logs/
 *.log
