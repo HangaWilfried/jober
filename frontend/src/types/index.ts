@@ -5,6 +5,7 @@ export interface JobAnalysis {
   matchingSkills: string[];
   missingSkills: string[];
   minExperienceYears: number;
+  analysisMethod: 'gemini' | 'local_fallback';
 }
 
 export interface JobOffer {
@@ -16,10 +17,12 @@ export interface JobOffer {
   url: string;
   source: string;
   description: string;
-  publishedAt: string;
-  status: 'new' | 'analyzed' | 'shortlisted' | 'rejected' | 'archived';
+  publishedAt: string | null;
+  expiresAt: string | null;
+  status: 'new' | 'analyzed' | 'shortlisted' | 'rejected' | 'archived' | 'expired';
   analysis?: JobAnalysis;
   applicationId?: string;
+  applicationStatus?: Application['status'];
 }
 
 export interface PreparedAnswer {
@@ -46,8 +49,12 @@ export interface ResumeItem {
 
 export interface ApplicationPreparedData {
   selectedResume?: ResumeItem;
+  availableResumes: ResumeItem[];
+  customizedResumeContent: string;
+  customizedResumeConfirmed: boolean;
   customizedHighlights: string[];
   coverLetter: string;
+  coverLetterConfirmed: boolean;
   preparedAnswers: PreparedAnswer[];
 }
 
@@ -90,4 +97,3 @@ export interface UserProfile {
   searchPreferences: SearchPreferences;
   resumes: ResumeItem[];
 }
-

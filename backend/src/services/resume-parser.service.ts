@@ -1,4 +1,5 @@
 import fs from 'fs/promises';
+import { randomUUID } from 'crypto';
 import path from 'path';
 import { PDFParse } from 'pdf-parse';
 
@@ -10,6 +11,13 @@ export interface ParsedResumeResult {
   detectedEmail?: string;
   detectedPhone?: string;
   wordCount: number;
+}
+
+export class ResumeParseError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'ResumeParseError';
+  }
 }
 
 // Dictionnaire de compétences courantes pour l'extraction locale sans IA
@@ -30,46 +38,102 @@ export class ResumeParserService {
     await fs.mkdir(this.uploadsDir, { recursive: true });
   }
 
+  async parseResumeBuffer(buffer: Buffer, originalFilename: string): Promise<ParsedResumeResult> {
+    const extension = path.extname(originalFilename).toLowerCase();
+    if (extension === '.pdf') return this.parsePdfBuffer(buffer, originalFilename);
+    if (extension === '.txt') return this.parseTextBuffer(buffer, originalFilename);
+    throw new ResumeParseError('Formats acceptés : PDF et texte brut (.txt).');
+  }
+
+  async parseTextBuffer(buffer: Buffer, originalFilename: string): Promise<ParsedResumeResult> {
+    await this.init();
+    if (buffer.includes(0)) {
+      throw new ResumeParseError('Le fichier texte contient des données binaires invalides.');
+    }
+
+    let extractedText: string;
+    try {
+      extractedText = new TextDecoder('utf-8', { fatal: true })
+        .decode(buffer)
+        .replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F]/g, '')
+        .trim();
+    } catch {
+      throw new ResumeParseError('Le fichier texte doit être encodé en UTF-8.');
+    }
+    if (!extractedText) {
+      throw new ResumeParseError('Le fichier texte est vide ou illisible.');
+    }
+
+    const filePath = await this.saveResumeFile(buffer, originalFilename);
+    return this.buildResult(extractedText, originalFilename, filePath);
+  }
+
   /**
    * Parse le buffer d'un fichier PDF et en extrait le texte et les métadonnées
    */
   async parsePdfBuffer(buffer: Buffer, originalFilename: string): Promise<ParsedResumeResult> {
-    await this.init();
-
-    // 1. Sauvegarde du fichier localement
-    const safeFilename = `${Date.now()}_${originalFilename.replace(/[^a-zA-Z0-9.-]/g, '_')}`;
-    const filePath = path.join(this.uploadsDir, safeFilename);
-    await fs.writeFile(filePath, buffer);
-
-    // 2. Extraction du texte via PDFParse
-    let extractedText = '';
-    try {
-      const parser = new PDFParse({ data: buffer });
-      const textResult = await parser.getText();
-      extractedText = textResult.text.trim();
-      await parser.destroy();
-    } catch (err: any) {
-      console.error('Erreur extraction PDF:', err);
-      extractedText = `Erreur lors de l extraction du texte PDF : ${err.message}`;
+    if (!buffer.subarray(0, 5).equals(Buffer.from('%PDF-'))) {
+      throw new ResumeParseError('Le fichier fourni ne semble pas être un PDF valide.');
     }
 
-    // 3. Détection des compétences par mots-clés
-    const detectedSkills = this.extractSkills(extractedText);
+    await this.init();
 
-    // 4. Détection heuristique d'email et téléphone
-    const detectedEmail = this.extractEmail(extractedText);
-    const detectedPhone = this.extractPhone(extractedText);
+    const filePath = await this.saveResumeFile(buffer, originalFilename);
 
-    const wordCount = extractedText.split(/\s+/).filter(Boolean).length;
+    let parser: PDFParse | undefined;
+    try {
+      parser = new PDFParse({ data: buffer });
+      const textResult = await parser.getText();
+      const extractedText = textResult.text.trim();
+      if (!extractedText) {
+        throw new ResumeParseError(
+          'Aucun texte extractible dans ce PDF. Il est peut-être scanné et nécessite un traitement OCR.'
+        );
+      }
 
+      return this.buildResult(extractedText, originalFilename, filePath);
+    } catch (error) {
+      try {
+        await fs.unlink(filePath);
+      } catch (cleanupError) {
+        console.error(`Impossible de supprimer le PDF invalide ${filePath}:`, cleanupError);
+      }
+
+      if (error instanceof ResumeParseError) throw error;
+      throw new ResumeParseError(
+        `Impossible d'extraire le texte du PDF : ${error instanceof Error ? error.message : 'erreur inconnue'}`
+      );
+    } finally {
+      if (parser) {
+        try {
+          await parser.destroy();
+        } catch (error) {
+          console.error('Impossible de fermer correctement le parseur PDF:', error);
+        }
+      }
+    }
+  }
+
+  private async saveResumeFile(buffer: Buffer, originalFilename: string): Promise<string> {
+    const safeFilename = `${randomUUID()}_${originalFilename.replace(/[^a-zA-Z0-9.-]/g, '_')}`;
+    const filePath = path.join(this.uploadsDir, safeFilename);
+    await fs.writeFile(filePath, buffer);
+    return filePath;
+  }
+
+  private buildResult(
+    extractedText: string,
+    originalFilename: string,
+    filePath: string
+  ): ParsedResumeResult {
     return {
       fileName: originalFilename,
       filePath,
       extractedText,
-      detectedSkills,
-      detectedEmail,
-      detectedPhone,
-      wordCount
+      detectedSkills: this.extractSkills(extractedText),
+      detectedEmail: this.extractEmail(extractedText),
+      detectedPhone: this.extractPhone(extractedText),
+      wordCount: extractedText.split(/\s+/).filter(Boolean).length
     };
   }
 
@@ -100,4 +164,3 @@ export class ResumeParserService {
 }
 
 export const resumeParser = new ResumeParserService();
-

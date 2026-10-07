@@ -3,6 +3,9 @@ import { store } from '../services/store.service.js';
 import { geminiService } from '../services/gemini.service.js';
 import { prisma } from '../db/prisma.js';
 import { jobCollector } from '../services/collector/job-collector.service.js';
+import { calculateReadinessScore } from '../services/application-readiness.service.js';
+import { selectMostRelevantResume } from '../services/resume-selection.service.js';
+import { ManualJobInputSchema, SearchPreferencesSchema } from '../types/index.js';
 
 export const jobRoutes: FastifyPluginAsync = async (fastify) => {
   // GET /api/v1/jobs
@@ -28,21 +31,13 @@ export const jobRoutes: FastifyPluginAsync = async (fastify) => {
 
   // POST /api/v1/jobs/analyze-manual (Analyse IA d'une offre collée ou ajoutée)
   fastify.post('/jobs/analyze-manual', async (request, reply) => {
-    const body = request.body as {
-      title: string;
-      company: string;
-      location?: string;
-      remoteType?: string;
-      url?: string;
-      source?: string;
-      description: string;
-    };
-
-    if (!body.title || !body.company || !body.description) {
+    const parsedBody = ManualJobInputSchema.safeParse(request.body);
+    if (!parsedBody.success) {
       return reply.status(400).send({
-        error: 'Le titre du poste, le nom de l entreprise et la description sont requis.'
+        error: 'Un titre, une entreprise, une URL http(s) valide et une description complète (100 caractères minimum) sont requis.'
       });
     }
+    const body = parsedBody.data;
 
     // Récupérer le profil et le CV principal dans SQLite
     const user = await prisma.userProfile.findFirst({
@@ -53,8 +48,15 @@ export const jobRoutes: FastifyPluginAsync = async (fastify) => {
       return reply.status(400).send({ error: 'Aucun profil utilisateur trouvé en base.' });
     }
 
-    const primaryResume = user.resumes.find(r => r.isPrimary) || user.resumes[0];
-    const cvText = primaryResume?.extractedText || '';
+    const searchPreferences = SearchPreferencesSchema.parse(
+      JSON.parse(user.searchPreferences || '{}')
+    );
+    const selectedResume = selectMostRelevantResume(
+      user.resumes,
+      body.description,
+      JSON.parse(user.skills || '[]')
+    );
+    const cvText = selectedResume?.extractedText || '';
 
     // Lancement de l'analyse IA via Gemini
     const analysisResult = await geminiService.analyzeJob({
@@ -66,7 +68,7 @@ export const jobRoutes: FastifyPluginAsync = async (fastify) => {
         headline: user.headline,
         skills: JSON.parse(user.skills || '[]'),
         location: user.location,
-        searchPreferences: JSON.parse(user.searchPreferences || '{}')
+        searchPreferences
       },
       cvText
     });
@@ -80,7 +82,7 @@ export const jobRoutes: FastifyPluginAsync = async (fastify) => {
         company: body.company,
         location: body.location || 'Non spécifié',
         remoteType: body.remoteType || 'unknown',
-        url: body.url || 'https://example.com',
+        url: body.url,
         source: body.source || 'Ajout manuel',
         description: body.description,
         status,
@@ -91,7 +93,8 @@ export const jobRoutes: FastifyPluginAsync = async (fastify) => {
             requiredSkills: JSON.stringify(analysisResult.requiredSkills),
             matchingSkills: JSON.stringify(analysisResult.matchingSkills),
             missingSkills: JSON.stringify(analysisResult.missingSkills),
-            minExperienceYears: analysisResult.minExperienceYears
+            minExperienceYears: analysisResult.minExperienceYears,
+            analysisMethod: analysisResult.analysisMethod
           }
         }
       }
@@ -99,25 +102,53 @@ export const jobRoutes: FastifyPluginAsync = async (fastify) => {
 
     // Si match suffisant, préparation automatique du dossier de candidature
     if (analysisResult.matchScore >= 60) {
-      const hasBlockers = analysisResult.potentialBlockers.length > 0;
-      const initialReadiness = hasBlockers ? 80 : 100;
-      const initialStatus = hasBlockers ? 'ready_for_review' : 'ready_to_submit';
+      const blockers = [...analysisResult.potentialBlockers];
+      if (searchPreferences.minSalary &&
+        !blockers.some((blocker) => blocker.type === 'salary_expectation')) {
+        blockers.push({
+          type: 'salary_expectation',
+          question: `Confirmez que cette offre respecte votre salaire minimum de ${searchPreferences.minSalary} EUR brut annuel.`
+        });
+      }
+      if (!blockers.some((blocker) => blocker.type === 'other' && /\bcv\b/i.test(blocker.question))) {
+        blockers.push({
+          type: 'other',
+          question: 'Vérifiez que le CV adapté ne contient que des informations exactes avant de l’envoyer.'
+        });
+      }
+      if (!selectedResume?.extractedText?.trim() &&
+        !blockers.some((blocker) => blocker.type === 'missing_document')) {
+        blockers.push({
+          type: 'missing_document',
+          question: 'Ajoutez ou sélectionnez un CV contenant du texte avant de soumettre cette candidature.'
+        });
+      }
+      const readinessScore = calculateReadinessScore({
+        hasResume: Boolean(selectedResume?.extractedText?.trim()),
+        customizedResumeConfirmed: false,
+        coverLetterConfirmed: false,
+        unresolvedBlockerCount: blockers.length + analysisResult.preparedAnswers.length
+      });
+      const initialStatus = readinessScore === 100 ? 'ready_to_submit' : 'ready_for_review';
 
       await prisma.application.create({
         data: {
           jobId: newJob.id,
           status: initialStatus,
           matchScore: analysisResult.matchScore,
-          readinessScore: initialReadiness,
-          selectedResumeId: primaryResume?.id,
+          readinessScore,
+          selectedResumeId: selectedResume?.id,
           coverLetter: analysisResult.draftCoverLetter,
+          coverLetterConfirmed: false,
+          customizedResumeContent: analysisResult.customizedResumeContent,
+          customizedResumeConfirmed: false,
           customizedHighlights: JSON.stringify(analysisResult.customizedHighlights),
           preparedAnswers: JSON.stringify(analysisResult.preparedAnswers.map(a => ({
             ...a,
             isConfirmed: false
           }))),
           blockers: {
-            create: analysisResult.potentialBlockers.map(b => ({
+            create: blockers.map(b => ({
               type: b.type,
               question: b.question,
               resolved: false,
@@ -141,7 +172,7 @@ export const jobRoutes: FastifyPluginAsync = async (fastify) => {
     try {
       const result = await jobCollector.runCollection();
       return {
-        message: `Collecte terminée : ${result.newOffersSaved} nouvelle(s) offre(s) indexée(s), ${result.duplicatesSkipped} doublon(s) ignoré(s).${result.failedSources.length ? ` Sources indisponibles : ${result.failedSources.join(', ')}.` : ''}`,
+        message: `Collecte terminée : ${result.newOffersSaved} nouvelle(s) offre(s) indexée(s), ${result.duplicatesSkipped} doublon(s) ignoré(s), ${result.expiredOffers} expirée(s) ignorée(s), ${result.incompleteOffers} incomplète(s) écartée(s).${result.failedSources.length ? ` Sources indisponibles : ${result.failedSources.join(', ')}.` : ''}`,
         result
       };
     } catch (err) {
@@ -167,7 +198,11 @@ export const jobRoutes: FastifyPluginAsync = async (fastify) => {
       return reply.status(400).send({ error: 'Profil utilisateur introuvable' });
     }
 
-    const primaryResume = user.resumes.find(r => r.isPrimary) || user.resumes[0];
+    const reanalysisResume = selectMostRelevantResume(
+      user.resumes,
+      job.description,
+      JSON.parse(user.skills || '[]')
+    );
 
     const analysisResult = await geminiService.analyzeJob({
       jobTitle: job.title,
@@ -180,7 +215,7 @@ export const jobRoutes: FastifyPluginAsync = async (fastify) => {
         location: user.location,
         searchPreferences: JSON.parse(user.searchPreferences || '{}')
       },
-      cvText: primaryResume?.extractedText || ''
+      cvText: reanalysisResume?.extractedText || ''
     });
 
     // Mise à jour de l'analyse dans SQLite
@@ -192,7 +227,8 @@ export const jobRoutes: FastifyPluginAsync = async (fastify) => {
         requiredSkills: JSON.stringify(analysisResult.requiredSkills),
         matchingSkills: JSON.stringify(analysisResult.matchingSkills),
         missingSkills: JSON.stringify(analysisResult.missingSkills),
-        minExperienceYears: analysisResult.minExperienceYears
+        minExperienceYears: analysisResult.minExperienceYears,
+        analysisMethod: analysisResult.analysisMethod
       },
       create: {
         jobId: id,
@@ -201,7 +237,8 @@ export const jobRoutes: FastifyPluginAsync = async (fastify) => {
         requiredSkills: JSON.stringify(analysisResult.requiredSkills),
         matchingSkills: JSON.stringify(analysisResult.matchingSkills),
         missingSkills: JSON.stringify(analysisResult.missingSkills),
-        minExperienceYears: analysisResult.minExperienceYears
+        minExperienceYears: analysisResult.minExperienceYears,
+        analysisMethod: analysisResult.analysisMethod
       }
     });
 

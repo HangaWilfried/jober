@@ -5,13 +5,11 @@ const prisma = new PrismaClient();
 async function main() {
   console.log('🌱 Début du peuplement de la base de données SQLite...');
 
-  // Nettoyage existant
-  await prisma.applicationBlocker.deleteMany();
-  await prisma.application.deleteMany();
-  await prisma.jobAnalysis.deleteMany();
-  await prisma.jobOffer.deleteMany();
-  await prisma.resume.deleteMany();
-  await prisma.userProfile.deleteMany();
+  const existingProfile = await prisma.userProfile.findFirst();
+  if (existingProfile) {
+    console.log('Profil existant détecté : seed ignoré afin de préserver les données locales.');
+    return;
+  }
 
   // 1. Profil Utilisateur
   const profile = await prisma.userProfile.create({
@@ -205,4 +203,3 @@ main()
   .finally(async () => {
     await prisma.$disconnect();
   });
-

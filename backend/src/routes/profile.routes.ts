@@ -1,7 +1,12 @@
 import { FastifyPluginAsync } from 'fastify';
 import { store } from '../services/store.service.js';
-import { resumeParser } from '../services/resume-parser.service.js';
+import {
+  ResumeParseError,
+  resumeParser,
+  type ParsedResumeResult
+} from '../services/resume-parser.service.js';
 import { prisma } from '../db/prisma.js';
+import { UserProfileUpdateSchema } from '../types/index.js';
 
 export const profileRoutes: FastifyPluginAsync = async (fastify) => {
   // GET /api/v1/profile
@@ -10,9 +15,12 @@ export const profileRoutes: FastifyPluginAsync = async (fastify) => {
   });
 
   // PUT /api/v1/profile
-  fastify.put('/profile', async (request) => {
-    const body = request.body as Record<string, unknown>;
-    return store.updateProfile(body);
+  fastify.put('/profile', async (request, reply) => {
+    const parsed = UserProfileUpdateSchema.safeParse(request.body);
+    if (!parsed.success) {
+      return reply.status(400).send({ error: 'Les informations du profil sont invalides.' });
+    }
+    return store.updateProfile(parsed.data);
   });
 
   // POST /api/v1/profile/resume/upload
@@ -22,17 +30,24 @@ export const profileRoutes: FastifyPluginAsync = async (fastify) => {
       return reply.status(400).send({ error: 'Aucun fichier PDF fourni' });
     }
 
-    if (!data.filename.toLowerCase().endsWith('.pdf')) {
-      return reply.status(400).send({ error: 'Seuls les fichiers PDF sont acceptés' });
+    if (!/\.(pdf|txt)$/i.test(data.filename)) {
+      return reply.status(400).send({ error: 'Formats acceptés : PDF et texte brut (.txt).' });
     }
 
-    const buffer = await data.toBuffer();
-    const parsed = await resumeParser.parsePdfBuffer(buffer, data.filename);
-
-    // Récupérer le profil utilisateur
     const user = await prisma.userProfile.findFirst();
     if (!user) {
       return reply.status(404).send({ error: 'Profil utilisateur introuvable' });
+    }
+
+    const buffer = await data.toBuffer();
+    let parsed: ParsedResumeResult;
+    try {
+      parsed = await resumeParser.parseResumeBuffer(buffer, data.filename);
+    } catch (error) {
+      if (error instanceof ResumeParseError) {
+        return reply.status(400).send({ error: error.message });
+      }
+      throw error;
     }
 
     // Si premier CV ou marqué comme principal

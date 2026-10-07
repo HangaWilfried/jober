@@ -22,7 +22,7 @@ async function handleSubmit() {
     company: form.company,
     location: form.location || 'Paris, France',
     remoteType: form.remoteType,
-    url: form.url || 'https://example.com',
+    url: form.url,
     description: form.description
   });
 
@@ -113,9 +113,10 @@ async function handleSubmit() {
           </div>
 
           <div>
-            <label class="block text-xs font-semibold text-slate-300 mb-1">Lien de l'offre (URL)</label>
+            <label class="block text-xs font-semibold text-slate-300 mb-1">Lien de l'offre (URL) *</label>
             <input
               v-model="newJobForm.url"
+              required
               type="url"
               placeholder="https://..."
               class="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-indigo-500"

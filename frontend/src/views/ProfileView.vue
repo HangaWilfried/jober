@@ -4,9 +4,7 @@ import { useProfileStore } from '../stores/profile';
 import { Check } from 'lucide-vue-next';
 import ResumeUploadSection from '../components/profile/ResumeUploadSection.vue';
 import ResumeListSection from '../components/profile/ResumeListSection.vue';
-import ProfileSkillsSection from '../components/profile/ProfileSkillsSection.vue';
-import ProfileIdentitySection from '../components/profile/ProfileIdentitySection.vue';
-import ProfilePreferencesSection from '../components/profile/ProfilePreferencesSection.vue';
+import ProfileSettingsForm from '../components/profile/ProfileSettingsForm.vue';
 
 const profileStore = useProfileStore();
 
@@ -20,7 +18,7 @@ onMounted(() => {
     <div>
       <h1 class="text-2xl font-bold text-white mb-1">Profil & Base de CVs</h1>
       <p class="text-slate-400 text-sm">
-        Importez votre vrai CV au format PDF. Le parseur local extrait le texte et indexe vos compétences dans SQLite pour le moteur de matching.
+        Importez votre CV en PDF ou texte brut. Le parseur local extrait son contenu et indexe les compétences dans SQLite pour le moteur de matching.
       </p>
     </div>
 
@@ -53,9 +51,11 @@ onMounted(() => {
         @set-primary="profileStore.setPrimaryResume"
         @delete="profileStore.deleteResume"
       />
-      <ProfileSkillsSection :skills="profileStore.profile.skills" />
-      <ProfileIdentitySection :profile="profileStore.profile" />
-      <ProfilePreferencesSection :preferences="profileStore.profile.searchPreferences" />
+      <ProfileSettingsForm
+        :profile="profileStore.profile"
+        :saving="profileStore.loading"
+        @save="profileStore.updateProfile"
+      />
     </div>
   </div>
 </template>

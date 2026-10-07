@@ -89,11 +89,16 @@ export const useJobsStore = defineStore('jobs', () => {
 
   async function triggerCollect() {
     loading.value = true;
+    error.value = null;
+    successMessage.value = null;
     try {
       const res = await fetch('/api/v1/jobs/collect', { method: 'POST' });
-      if (res.ok) {
-        await fetchJobs();
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data.error || 'Erreur lors de la synchronisation');
       }
+      successMessage.value = data.message || 'Offres synchronisées avec succès !';
+      await fetchJobs();
     } catch (err: any) {
       error.value = err.message;
     } finally {

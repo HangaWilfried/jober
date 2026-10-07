@@ -1,5 +1,6 @@
 import { prisma } from '../db/prisma.js';
-import type { UserProfile, JobOffer, Application } from '../types/index.js';
+import { calculateReadinessScore } from './application-readiness.service.js';
+import type { UserProfile, JobOffer, Application, ApplicationUpdate } from '../types/index.js';
 
 export class DatabaseService {
   // ========================
@@ -80,7 +81,8 @@ export class DatabaseService {
           requiredSkills: JSON.parse(o.analysis.requiredSkills || '[]'),
           matchingSkills: JSON.parse(o.analysis.matchingSkills || '[]'),
           missingSkills: JSON.parse(o.analysis.missingSkills || '[]'),
-          minExperienceYears: o.analysis.minExperienceYears
+          minExperienceYears: o.analysis.minExperienceYears,
+          analysisMethod: o.analysis.analysisMethod as 'gemini' | 'local_fallback'
         };
       }
 
@@ -93,10 +95,12 @@ export class DatabaseService {
         url: o.url,
         source: o.source,
         description: o.description,
-        publishedAt: o.publishedAt.toISOString(),
+        publishedAt: o.publishedAt?.toISOString() ?? null,
+        expiresAt: o.expiresAt?.toISOString() ?? null,
         status: o.status as any,
         analysis,
-        applicationId: o.application?.id
+        applicationId: o.application?.id,
+        applicationStatus: o.application?.status as Application['status'] | undefined
       };
     });
 
@@ -126,7 +130,8 @@ export class DatabaseService {
         requiredSkills: JSON.parse(o.analysis.requiredSkills || '[]'),
         matchingSkills: JSON.parse(o.analysis.matchingSkills || '[]'),
         missingSkills: JSON.parse(o.analysis.missingSkills || '[]'),
-        minExperienceYears: o.analysis.minExperienceYears
+        minExperienceYears: o.analysis.minExperienceYears,
+        analysisMethod: o.analysis.analysisMethod as 'gemini' | 'local_fallback'
       };
     }
 
@@ -139,10 +144,12 @@ export class DatabaseService {
       url: o.url,
       source: o.source,
       description: o.description,
-      publishedAt: o.publishedAt.toISOString(),
+      publishedAt: o.publishedAt?.toISOString() ?? null,
+      expiresAt: o.expiresAt?.toISOString() ?? null,
       status: o.status as any,
       analysis,
-      applicationId: o.application?.id
+      applicationId: o.application?.id,
+      applicationStatus: o.application?.status as Application['status'] | undefined
     };
   }
 
@@ -181,28 +188,30 @@ export class DatabaseService {
   }
 
   private async formatApplication(a: any): Promise<Application> {
-    let selectedResume: any = undefined;
-    if (a.selectedResumeId) {
-      const resume = await prisma.resume.findUnique({ where: { id: a.selectedResumeId } });
-      if (resume) {
-        selectedResume = {
-          id: resume.id,
-          name: resume.name,
-          isPrimary: resume.isPrimary,
-          updatedAt: resume.updatedAt.toISOString()
-        };
-      }
-    } else {
-      const primaryResume = await prisma.resume.findFirst({ where: { isPrimary: true } });
-      if (primaryResume) {
-        selectedResume = {
-          id: primaryResume.id,
-          name: primaryResume.name,
-          isPrimary: primaryResume.isPrimary,
-          updatedAt: primaryResume.updatedAt.toISOString()
-        };
-      }
-    }
+    const [selectedResumeRecord, availableResumeRecords] = await Promise.all([
+      a.selectedResumeId
+        ? prisma.resume.findUnique({ where: { id: a.selectedResumeId } })
+        : Promise.resolve(null),
+      prisma.resume.findMany({
+        where: { extractedText: { not: null } },
+        select: { id: true, name: true, isPrimary: true, updatedAt: true, extractedText: true }
+      })
+    ]);
+    const toResumeItem = (resume: {
+      id: string;
+      name: string;
+      isPrimary: boolean;
+      updatedAt: Date;
+    }) => ({
+      id: resume.id,
+      name: resume.name,
+      isPrimary: resume.isPrimary,
+      updatedAt: resume.updatedAt.toISOString()
+    });
+    const selectedResume = selectedResumeRecord ? toResumeItem(selectedResumeRecord) : undefined;
+    const availableResumes = availableResumeRecords
+      .filter((resume) => Boolean(resume.extractedText?.trim()))
+      .map(toResumeItem);
 
     return {
       id: a.id,
@@ -214,8 +223,12 @@ export class DatabaseService {
       readinessScore: a.readinessScore,
       preparedData: {
         selectedResume,
+        availableResumes,
+        customizedResumeContent: a.customizedResumeContent,
+        customizedResumeConfirmed: a.customizedResumeConfirmed,
         customizedHighlights: JSON.parse(a.customizedHighlights || '[]'),
         coverLetter: a.coverLetter,
+        coverLetterConfirmed: a.coverLetterConfirmed,
         preparedAnswers: JSON.parse(a.preparedAnswers || '[]')
       },
       blockers: a.blockers.map((b: any) => ({
@@ -229,23 +242,107 @@ export class DatabaseService {
     };
   }
 
-  async updateApplication(id: string, updates: any): Promise<Application | null> {
+  async updateApplication(id: string, updates: ApplicationUpdate): Promise<Application | null> {
     const current = await prisma.application.findUnique({
       where: { id },
       include: { blockers: true }
     });
     if (!current) return null;
 
-    const data: any = {};
-    if (updates.status !== undefined) data.status = updates.status;
+    const data: {
+      coverLetter?: string;
+      coverLetterConfirmed?: boolean;
+      customizedResumeContent?: string;
+      customizedResumeConfirmed?: boolean;
+      customizedHighlights?: string;
+      preparedAnswers?: string;
+      selectedResumeId?: string | null;
+      readinessScore?: number;
+      status?: string;
+    } = {};
     if (updates.preparedData?.coverLetter !== undefined) {
       data.coverLetter = updates.preparedData.coverLetter;
+      if (updates.preparedData.coverLetter !== current.coverLetter) {
+        data.coverLetterConfirmed = false;
+      }
+    }
+    if (updates.preparedData?.coverLetterConfirmed !== undefined) {
+      if (updates.preparedData.coverLetterConfirmed && !(
+        updates.preparedData.coverLetter ?? current.coverLetter
+      ).trim()) return null;
+      data.coverLetterConfirmed = updates.preparedData.coverLetterConfirmed;
+    }
+    if (updates.preparedData?.customizedResumeContent !== undefined) {
+      data.customizedResumeContent = updates.preparedData.customizedResumeContent;
+      if (updates.preparedData.customizedResumeContent !== current.customizedResumeContent) {
+        data.customizedResumeConfirmed = false;
+      }
+    }
+    if (updates.preparedData?.customizedResumeConfirmed !== undefined) {
+      if (updates.preparedData.customizedResumeConfirmed && !(
+        updates.preparedData.customizedResumeContent ?? current.customizedResumeContent
+      ).trim()) return null;
+      data.customizedResumeConfirmed = updates.preparedData.customizedResumeConfirmed;
     }
     if (updates.preparedData?.customizedHighlights !== undefined) {
       data.customizedHighlights = JSON.stringify(updates.preparedData.customizedHighlights);
     }
     if (updates.preparedData?.preparedAnswers !== undefined) {
       data.preparedAnswers = JSON.stringify(updates.preparedData.preparedAnswers);
+    }
+    if (updates.preparedData?.selectedResumeId !== undefined) {
+      if (updates.preparedData.selectedResumeId === null) {
+        data.selectedResumeId = null;
+      } else {
+        const resume = await prisma.resume.findFirst({
+          where: {
+            id: updates.preparedData.selectedResumeId,
+            extractedText: { not: null }
+          }
+        });
+        if (!resume?.extractedText?.trim()) return null;
+        data.selectedResumeId = resume.id;
+      }
+      if (updates.preparedData.selectedResumeId !== current.selectedResumeId) {
+        data.customizedResumeContent = '';
+        data.customizedResumeConfirmed = false;
+        data.coverLetterConfirmed = false;
+      }
+    }
+
+    if (!current.status.startsWith('submitted_')) {
+      const selectedResumeId = data.selectedResumeId ?? current.selectedResumeId;
+      const resume = selectedResumeId
+        ? await prisma.resume.findUnique({ where: { id: selectedResumeId } })
+        : null;
+      const unresolvedBlockerCount = current.blockers.filter((blocker) => !blocker.resolved).length;
+      const answers: unknown = updates.preparedData?.preparedAnswers ??
+        JSON.parse(current.preparedAnswers || '[]');
+      const unconfirmedAnswers = Array.isArray(answers)
+        ? answers.filter((answer) =>
+            typeof answer === 'object' &&
+            answer !== null &&
+            'isConfirmed' in answer &&
+            answer.isConfirmed !== true
+          ).length
+        : 1;
+      const readinessScore = calculateReadinessScore({
+        hasResume: Boolean(resume?.extractedText?.trim()),
+        customizedResumeConfirmed:
+          data.customizedResumeConfirmed ?? (
+            data.selectedResumeId !== undefined
+              ? false
+              : current.customizedResumeConfirmed
+          ),
+        coverLetterConfirmed: data.coverLetterConfirmed ?? (
+          data.selectedResumeId !== undefined
+            ? false
+            : current.coverLetterConfirmed
+        ),
+        unresolvedBlockerCount: unresolvedBlockerCount + unconfirmedAnswers
+      });
+      data.readinessScore = readinessScore;
+      data.status = readinessScore === 100 ? 'ready_to_submit' : 'ready_for_review';
     }
 
     await prisma.application.update({
@@ -257,36 +354,84 @@ export class DatabaseService {
   }
 
   async resolveBlocker(appId: string, blockerId: string, response: string): Promise<Application | null> {
-    await prisma.applicationBlocker.update({
-      where: { id: blockerId },
-      data: {
-        resolved: true,
-        userResponse: response
-      }
-    });
+    if (!response.trim()) return null;
+    const resolved = await prisma.$transaction(async (transaction) => {
+      const application = await transaction.application.findUnique({
+        where: { id: appId },
+        include: { blockers: true }
+      });
+      const blocker = application?.blockers.find((item) => item.id === blockerId);
+      if (!application || !blocker) return false;
 
-    // Vérifie s'il reste des bloqueurs non résolus
-    const remainingUnresolved = await prisma.applicationBlocker.count({
-      where: {
-        applicationId: appId,
-        resolved: false
-      }
-    });
+      await transaction.applicationBlocker.update({
+        where: { id: blockerId },
+        data: { resolved: true, userResponse: response }
+      });
 
-    if (remainingUnresolved === 0) {
-      await prisma.application.update({
+      const unresolvedBlockerCount = await transaction.applicationBlocker.count({
+        where: { applicationId: appId, resolved: false }
+      });
+      const resume = application.selectedResumeId
+        ? await transaction.resume.findUnique({ where: { id: application.selectedResumeId } })
+        : null;
+      const answers: unknown = JSON.parse(application.preparedAnswers || '[]');
+      const unconfirmedAnswers = Array.isArray(answers)
+        ? answers.filter((answer) =>
+            typeof answer === 'object' &&
+            answer !== null &&
+            'isConfirmed' in answer &&
+            answer.isConfirmed !== true
+          ).length
+        : 1;
+      const readinessScore = calculateReadinessScore({
+        hasResume: Boolean(resume?.extractedText?.trim()),
+        customizedResumeConfirmed: application.customizedResumeConfirmed,
+        coverLetterConfirmed: application.coverLetterConfirmed,
+        unresolvedBlockerCount: unresolvedBlockerCount + unconfirmedAnswers
+      });
+      await transaction.application.update({
         where: { id: appId },
         data: {
-          readinessScore: 100,
-          status: 'ready_to_submit'
+          readinessScore,
+          status: readinessScore === 100 ? 'ready_to_submit' : 'ready_for_review'
         }
       });
-    }
+      return true;
+    });
+    if (!resolved) return null;
 
     return this.getApplicationById(appId);
   }
 
   async submitApplication(id: string): Promise<Application | null> {
+    const application = await prisma.application.findUnique({
+      where: { id },
+      include: { blockers: true }
+    });
+    if (!application) return null;
+
+    const unresolvedBlockers = application.blockers.some((blocker) => !blocker.resolved);
+    const answers: unknown = JSON.parse(application.preparedAnswers || '[]');
+    const unconfirmedAnswers = Array.isArray(answers) && answers.some((answer) =>
+      typeof answer === 'object' &&
+      answer !== null &&
+      'isConfirmed' in answer &&
+      answer.isConfirmed !== true
+    );
+    const resume = application.selectedResumeId
+      ? await prisma.resume.findUnique({ where: { id: application.selectedResumeId } })
+      : null;
+    const readinessScore = calculateReadinessScore({
+      hasResume: Boolean(resume?.extractedText?.trim()),
+      customizedResumeConfirmed: application.customizedResumeConfirmed,
+      coverLetterConfirmed: application.coverLetterConfirmed,
+      unresolvedBlockerCount: application.blockers.filter((blocker) => !blocker.resolved).length +
+        (unconfirmedAnswers ? 1 : 0)
+    });
+    if (unresolvedBlockers || unconfirmedAnswers || readinessScore !== 100) {
+      return null;
+    }
+
     await prisma.application.update({
       where: { id },
       data: {

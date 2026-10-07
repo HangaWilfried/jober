@@ -1,4 +1,27 @@
 import { GoogleGenAI, Type } from '@google/genai';
+import { z } from 'zod';
+import type { SearchPreferences } from '../types/index.js';
+
+const JobAnalysisResultSchema = z.object({
+  matchScore: z.number().int().min(0).max(100),
+  summary: z.string().min(1),
+  requiredSkills: z.array(z.string()),
+  matchingSkills: z.array(z.string()),
+  missingSkills: z.array(z.string()),
+  minExperienceYears: z.number().int().nonnegative(),
+  customizedResumeContent: z.string(),
+  customizedHighlights: z.array(z.string()),
+  draftCoverLetter: z.string(),
+  preparedAnswers: z.array(z.object({
+    question: z.string(),
+    suggestedAnswer: z.string(),
+    confidence: z.number().min(0).max(1)
+  })),
+  potentialBlockers: z.array(z.object({
+    type: z.enum(['subjective_question', 'missing_document', 'captcha', 'salary_expectation', 'other']),
+    question: z.string()
+  }))
+});
 
 export interface JobAnalysisResult {
   matchScore: number;
@@ -7,6 +30,7 @@ export interface JobAnalysisResult {
   matchingSkills: string[];
   missingSkills: string[];
   minExperienceYears: number;
+  customizedResumeContent: string;
   customizedHighlights: string[];
   draftCoverLetter: string;
   preparedAnswers: Array<{
@@ -18,6 +42,7 @@ export interface JobAnalysisResult {
     type: 'subjective_question' | 'missing_document' | 'captcha' | 'salary_expectation' | 'other';
     question: string;
   }>;
+  analysisMethod: 'gemini' | 'local_fallback';
 }
 
 export class GeminiService {
@@ -49,7 +74,7 @@ export class GeminiService {
       headline: string;
       skills: string[];
       location: string;
-      searchPreferences: any;
+      searchPreferences: SearchPreferences;
     };
     cvText: string;
   }): Promise<JobAnalysisResult> {
@@ -89,9 +114,10 @@ CONSIGNES STRICTES :
 3. Calcule un "matchScore" (entier entre 0 et 100) représentant la fidélité de l'adéquation technique et fonctionnelle.
 4. Rédige un résumé explicatif franc et objectif ("summary") expliquant pourquoi l'offre correspond ou pas.
 5. Identifie les "customizedHighlights" : 2 à 3 points forts concrets du candidat à valoriser pour cette offre spécifique.
-6. Rédige une lettre de motivation ("draftCoverLetter") personnalisée et percutante (en français), évitant le jargon creux.
-7. Identifie d'éventuels bloqueurs subjectifs ("potentialBlockers") requérant une réponse humaine (ex: "Pourquoi rejoindre notre entreprise ?").
-8. Prépare les réponses ("preparedAnswers") aux questions courantes (années d'expérience, disponibilité, etc.).
+6. Rédige une version du CV adaptée à l'offre ("customizedResumeContent"). Réorganise et reformule uniquement les faits déjà présents dans le CV. N'invente jamais d'expérience, date, diplôme, résultat, compétence ou chiffre. Omet les éléments inconnus; si le CV est absent, retourne une chaîne vide.
+7. Rédige une lettre de motivation ("draftCoverLetter") personnalisée et percutante (en français), évitant le jargon creux et les faits non présents dans le CV.
+8. Identifie d'éventuels bloqueurs subjectifs ("potentialBlockers") requérant une réponse humaine (ex: "Pourquoi rejoindre notre entreprise ?").
+9. Prépare les réponses ("preparedAnswers") aux questions courantes (années d'expérience, disponibilité, etc.), mais laisse vides celles pour lesquelles aucune donnée fiable n'est fournie.
 `;
 
       const response = await client.models.generateContent({
@@ -120,6 +146,10 @@ CONSIGNES STRICTES :
                 description: 'Compétences manquantes ou non mentionnées'
               },
               minExperienceYears: { type: Type.INTEGER, description: 'Années d expérience demandées' },
+              customizedResumeContent: {
+                type: Type.STRING,
+                description: 'CV adapté à l’offre sans ajout de faits non présents dans le CV source'
+              },
               customizedHighlights: {
                 type: Type.ARRAY,
                 items: { type: Type.STRING },
@@ -160,6 +190,7 @@ CONSIGNES STRICTES :
               'matchingSkills',
               'missingSkills',
               'minExperienceYears',
+              'customizedResumeContent',
               'customizedHighlights',
               'draftCoverLetter',
               'preparedAnswers',
@@ -173,8 +204,8 @@ CONSIGNES STRICTES :
         throw new Error('Réponse vide de Gemini');
       }
 
-      const parsed: JobAnalysisResult = JSON.parse(response.text);
-      return parsed;
+      const parsed = JobAnalysisResultSchema.parse(JSON.parse(response.text));
+      return { ...parsed, analysisMethod: 'gemini' };
     } catch (err: any) {
       console.error('Erreur lors de l appel Gemini API:', err);
       return this.fallbackLocalAnalysis(params);
@@ -281,49 +312,51 @@ ${params.cvText}
     cvText: string;
   }): JobAnalysisResult {
     const desc = params.jobDescription.toLowerCase();
-    const userSkills = params.userProfile.skills;
-
-    const matchingSkills = userSkills.filter(s => desc.includes(s.toLowerCase()));
-    const commonTechs = ['Vue', 'React', 'TypeScript', 'Node.js', 'Python', 'Java', 'Docker', 'PostgreSQL', 'Tailwind CSS', 'AWS', 'GraphQL'];
-    const requiredSkills = commonTechs.filter(t => desc.includes(t.toLowerCase()));
+    const candidateText = `${params.userProfile.skills.join(' ')} ${params.cvText}`.toLowerCase();
+    const commonTechs = [
+      'Vue.js', 'Vue 3', 'React', 'TypeScript', 'Node.js', 'Python', 'Java',
+      'Docker', 'PostgreSQL', 'Tailwind CSS', 'AWS', 'GraphQL', 'Fastify'
+    ];
+    const requiredSkills = commonTechs.filter((skill) => desc.includes(skill.toLowerCase()));
+    const matchingSkills = requiredSkills.filter((skill) => candidateText.includes(skill.toLowerCase()));
     
-    if (requiredSkills.length === 0) {
-      requiredSkills.push('Développement', 'Travail en équipe', 'Git');
+    const missingSkills = requiredSkills.filter((skill) => !matchingSkills.includes(skill));
+    const matchScore = requiredSkills.length === 0
+      ? 0
+      : Math.min(Math.round((matchingSkills.length / requiredSkills.length) * 100), 75);
+    const experienceMatch = params.jobDescription.match(
+      /(?:minimum|min\.?|au moins|[+]?)\s*(\d{1,2})\s*(?:ans?|années?)\s*(?:d['’ ]expérience)?/i
+    );
+    const minExperienceYears = experienceMatch ? Number(experienceMatch[1]) : 0;
+    const potentialBlockers: JobAnalysisResult['potentialBlockers'] = [{
+      type: 'subjective_question',
+      question: `Vérifiez les questions spécifiques posées par ${params.company} avant de répondre.`
+    }, {
+      type: 'other',
+      question: 'Le CV source n’a pas été adapté automatiquement. Adaptez-le et vérifiez son contenu avant de l’envoyer.'
+    }];
+    if (/\b(salaire|rémunération|prétentions)\b/i.test(params.jobDescription)) {
+      potentialBlockers.push({
+        type: 'salary_expectation',
+        question: 'Prétentions salariales : indiquez et confirmez votre montant.'
+      });
     }
-
-    const missingSkills = requiredSkills.filter(r => !matchingSkills.some(m => m.toLowerCase() === r.toLowerCase()));
-
-    const baseScore = requiredSkills.length > 0
-      ? Math.round((matchingSkills.length / Math.max(requiredSkills.length, 1)) * 100)
-      : 75;
-
-    const matchScore = Math.min(Math.max(baseScore, 30), 98);
 
     return {
       matchScore,
-      summary: `Analyse locale : ${matchingSkills.length} compétences concordantes identifiées (${matchingSkills.slice(0, 3).join(', ')}). ${missingSkills.length > 0 ? `Points d attention : ${missingSkills.join(', ')}.` : 'Bonne adéquation technique.'} (Pour une analyse IA avancée, ajoutez votre clé GEMINI_API_KEY dans backend/.env)`,
+      summary: `Estimation locale heuristique, à vérifier : ${matchingSkills.length} compétence(s) détectée(s) dans l'offre et le profil/CV. ${missingSkills.length > 0 ? `Compétences manquantes ou non vérifiées : ${missingSkills.join(', ')}.` : 'Aucune compétence détectée comme manquante.'} Ce score n'est pas une évaluation Gemini.`,
       requiredSkills,
       matchingSkills,
       missingSkills,
-      minExperienceYears: 3,
-      customizedHighlights: [
-        `Maîtrise démontrée des technologies clés : ${matchingSkills.slice(0, 2).join(', ') || 'Développement fullstack'}`,
-        `Profil orienté productivité et architectures maintenables`
-      ],
-      draftCoverLetter: `Madame, Monsieur,\n\nC'est avec grand intérêt que je vous soumets ma candidature pour le poste de ${params.jobTitle} chez ${params.company}.\n\nMon expérience sur ${matchingSkills.slice(0, 3).join(', ') || 'les technologies modernes'} me permet d'être rapidement opérationnel et de contribuer efficacement à vos projets.\n\nRestant à votre disposition pour tout échange,\n\n${params.userProfile.fullName}`,
-      preparedAnswers: [
-        {
-          question: 'Disponibilité / Préavis',
-          suggestedAnswer: '1 mois (négociable)',
-          confidence: 0.9
-        }
-      ],
-      potentialBlockers: [
-        {
-          type: 'subjective_question',
-          question: `Pourquoi souhaitez-vous rejoindre l'équipe de ${params.company} ?`
-        }
-      ]
+      minExperienceYears,
+      customizedResumeContent: params.cvText,
+      customizedHighlights: matchingSkills.length
+        ? [`Compétences mentionnées dans le CV ou le profil : ${matchingSkills.slice(0, 3).join(', ')}`]
+        : ['Ajoutez des réalisations vérifiables en lien avec les compétences exigées.'],
+      draftCoverLetter: `Madame, Monsieur,\n\nJe souhaite vous présenter ma candidature pour le poste de ${params.jobTitle} chez ${params.company}.\n\n${matchingSkills.length ? `Mon profil mentionne des compétences en ${matchingSkills.slice(0, 3).join(', ')}.` : 'Je souhaite échanger avec vous afin de préciser l’adéquation de mon parcours avec ce poste.'}\n\nRestant à votre disposition pour tout échange,\n\n${params.userProfile.fullName}`,
+      preparedAnswers: [],
+      potentialBlockers,
+      analysisMethod: 'local_fallback'
     };
   }
 }

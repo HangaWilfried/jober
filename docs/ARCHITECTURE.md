@@ -19,10 +19,10 @@ flowchart TD
 
     subgraph Backend ["Backend (Node.js + TypeScript)"]
         API_Gateway["API REST (Fastify + Zod)"]
-        Module_Collector["Collecteur / Scraper (Playwright, RSS, APIs)"]
+        Module_Collector["Collecteur HTTP (WTTJ, RSS, APIs)"]
         Module_Analysis["Moteur d'Analyse & Matching (Gemini LLM / Règles)"]
         Module_Prep["Générateur de Candidatures (CV adapté, LM, Q&A)"]
-        Module_Automator["Exécuteur de Candidature (Playwright Automator)"]
+        Module_Automator["Automateur prudent Greenhouse / Lever (Playwright)"]
         DB[(Base de Données Locale - SQLite / Prisma)]
     end
 
@@ -46,6 +46,7 @@ flowchart TD
 - **Orchestration LLM moderne :** Pour appeler les modèles (Google Gemini, OpenAI, Claude ou Ollama localement), tout se fait via des APIs HTTP/REST ou les SDKs officiels Node.js (`@google/genai`, `@google/generative-ai`, SDK OpenAI). Node.js est taillé pour les I/O asynchrones et le streaming de réponses en temps réel.
 - **Typage & Structured Outputs avec Zod :** Zod en TypeScript permet de forcer le LLM à retourner des schémas JSON stricts et validés à l'exécution (extraire les compétences, calculer les scores, identifier les points bloquants).
 - **Automatisation Web & Playwright :** Playwright a été conçu par Microsoft en premier pour Node.js. L'automatisation des formulaires web et la détection des champs est fluide et performante dans l'écosystème Node.js/TypeScript.
+- **État réel :** les collecteurs utilisent HTTP, RSS et APIs publiques sans Playwright. Playwright est réservé à l'automateur Greenhouse/Lever ; les autres sites ne sont pas soumis automatiquement.
 - **Modularité :** Si une tâche nécessitait un traitement Python spécifique (ex: modèle local PyTorch), elle pourra tourner dans un conteneur dédié sans impacter l'architecture.
 
 ---
@@ -57,7 +58,9 @@ flowchart TD
 Conformément à [GEMINI.md](../GEMINI.md) :
 - **`match_score` (0-100%)** : Adéquation entre le profil utilisateur et les exigences du poste.
 - **`readiness_score` (0-100%)** : Niveau de préparation et de faisabilité de la candidature.
-- **Règle d'automatisation :** Candidature envoyée automatiquement **uniquement si** `match_score >= 90%` ET `readiness_score == 100%` ET `blockers` est vide. Tout score inférieur ou présence d'un point bloquant bascule en statut **Human Review**.
+- **Règle d'automatisation :** Candidature envoyée automatiquement **uniquement si** `match_score >= 90%`, `readiness_score == 100%`, le CV et la lettre sont explicitement confirmés, et bloqueurs/réponses inconnues sont résolus. Tout score inférieur ou point bloquant arrête l'automatisation.
+- **Garde actuelle :** l'automatisation active est limitée aux formulaires HTTPS standard Greenhouse/Lever. Une confirmation manuelle n'est possible que si readiness vaut 100, les bloqueurs sont résolus et les réponses préparées sont confirmées.
+- **Calcul actuel de readiness :** CV source analysable (30), CV adapté explicitement confirmé (30), lettre explicitement confirmée (20), et aucun bloqueur ou réponse non confirmée (20). Un score de 100 indique un dossier préparé, pas que l'utilisateur l'a déjà soumis.
 
 ### 3.2. Schéma Relationnel
 
@@ -90,6 +93,7 @@ erDiagram
         string remote_type
         text description_raw
         datetime published_at
+        datetime expires_at
         string status
     }
 
@@ -100,6 +104,7 @@ erDiagram
         json required_skills
         json missing_skills
         int min_experience_years
+        string analysis_method
         text match_summary
         datetime analyzed_at
     }
@@ -111,7 +116,9 @@ erDiagram
         int readiness_score
         string selected_resume_id
         text customized_resume_content
+        boolean customized_resume_confirmed
         text cover_letter
+        boolean cover_letter_confirmed
         json prepared_answers
         datetime submitted_at
     }
@@ -138,15 +145,12 @@ stateDiagram-v2
     Analyzed --> Prepared: Match >= 60% (Génération CV/LM)
     
     Prepared --> ReadyToReview: Readiness < 100% ou Bloqueurs
-    Prepared --> AutoSubmitting: Match >= 90% ET Readiness == 100%
+    Prepared --> ReadyToReview: Match >= 90% ET Readiness == 100% (automatisation à implémenter)
     
     ReadyToReview --> ReadyToSubmit: Validé par l'utilisateur
     ReadyToReview --> Rejected: Rejeté par l'utilisateur
     
     ReadyToSubmit --> Submitted: Soumission manuelle ou assistée
-    AutoSubmitting --> Submitted: Candidature réussie
-    AutoSubmitting --> ReadyToReview: Échec ou Détection CAPTCHA
-    
     Submitted --> [*]
     Rejected --> [*]
 ```
@@ -160,7 +164,7 @@ Base URL : `/api/v1`
 ### 5.1. Profil Utilisateur & Préférences
 
 #### `GET /profile`
-Récupère le profil courant, les compétences et les préférences de veille.
+Récupère le profil courant, les compétences, les préférences de veille et les CV.
 * **Réponse (200 OK) :**
 ```json
 {
@@ -173,7 +177,7 @@ Récupère le profil courant, les compétences et les préférences de veille.
   "skills": ["Vue.js", "TypeScript", "Tailwind CSS", "Node.js", "GraphQL"],
   "searchPreferences": {
     "targetTitles": ["Frontend Lead", "Senior Vue Developer", "Fullstack Node/Vue"],
-    "remote": "hybrid_or_full",
+    "remote": "hybrid",
     "minSalary": 65000,
     "locations": ["Paris", "Télétravail"]
   },
@@ -189,7 +193,13 @@ Récupère le profil courant, les compétences et les préférences de veille.
 ```
 
 #### `PUT /profile`
-Mise à jour des informations personnelles et préférences de recherche.
+Met à jour les informations personnelles, les compétences et les critères de recherche. Les critères incluent postes ciblés, localisation, télétravail, exclusions d'entreprises et salaire minimum en EUR annuel.
+
+#### `POST /profile/resume/upload`
+Accepte les PDF avec texte extractible ou les fichiers `.txt` UTF-8. Les PDF scannés nécessitent de l'OCR, qui n'est pas encore fourni.
+
+#### `POST /profile/resume/:id/primary` et `DELETE /profile/resume/:id`
+Permettent de choisir le CV principal ou de supprimer un CV.
 
 ---
 
@@ -198,11 +208,10 @@ Mise à jour des informations personnelles et préférences de recherche.
 #### `GET /jobs`
 Liste filtrée et paginée des offres collectées.
 * **Query Parameters :**
-  - `status` : `new | analyzed | shortlisted | rejected | archived`
+  - `status` : `new | analyzed | shortlisted | rejected | archived | expired`
   - `minMatch` : nombre (ex: `70`)
   - `source` : string (ex: `wttj`, `linkedin`)
-  - `page` : entier (défaut : `1`)
-  - `limit` : entier (défaut : `20`)
+  - La pagination et le filtre par source ne sont pas encore implémentés.
 
 * **Réponse (200 OK) :**
 ```json
@@ -217,6 +226,7 @@ Liste filtrée et paginée des offres collectées.
       "url": "https://example.com/jobs/101",
       "source": "wttj",
       "publishedAt": "2026-10-05T14:30:00Z",
+      "expiresAt": null,
       "status": "analyzed",
       "analysis": {
         "matchScore": 92,
@@ -224,25 +234,35 @@ Liste filtrée et paginée des offres collectées.
         "requiredSkills": ["Vue.js", "TypeScript", "Node.js", "Docker"],
         "matchingSkills": ["Vue.js", "TypeScript", "Node.js"],
         "missingSkills": ["Docker"],
-        "minExperienceYears": 5
+        "minExperienceYears": 5,
+        "analysisMethod": "gemini"
       },
       "applicationId": "app_501"
     }
   ],
-  "total": 45,
-  "page": 1,
-  "limit": 20
+  "total": 1
 }
 ```
 
 #### `POST /jobs/collect`
-Déclenche la collecte/synchronisation manuelle ou planifiée des offres depuis les sources configurées.
-* **Réponse (202 Accepted) :**
+Déclenche la collecte synchrone ; le même collecteur s'exécute au démarrage puis toutes les six heures.
+Sources actuelles : Welcome to the Jungle (HTML public + JSON-LD), We Work Remotely (RSS) et RemoteOK (API).
+Les offres incomplètes sont écartées, les dates d'expiration disponibles sont appliquées et les sources défaillantes sont listées dans le résultat.
+* **Réponse (200 OK) :**
 ```json
 {
-  "taskId": "task_collect_889",
-  "status": "running",
-  "message": "Collecte lancée en arrière-plan"
+  "message": "Collecte terminée...",
+  "result": {
+    "totalDiscovered": 10,
+    "newOffersSaved": 2,
+    "duplicatesSkipped": 6,
+    "expiredOffers": 1,
+    "incompleteOffers": 1,
+    "filteredOut": 0,
+    "highlyRelevantMatches": 1,
+    "sources": ["Welcome to the Jungle", "RemoteOK"],
+    "failedSources": ["We Work Remotely: HTTP 503"]
+  }
 }
 ```
 
@@ -254,8 +274,7 @@ Force la ré-analyse d'une offre via le moteur LLM.
 ### 5.3. Gestion & Préparation des Candidatures (`/applications`)
 
 #### `GET /applications`
-Liste des candidatures en cours (vue Dashboard / Kanban de suivi).
-* **Query Parameters :** `status`, `minReadiness`
+Liste des candidatures, filtrable par `status`.
 
 #### `GET /applications/:id`
 Détail complet d'une candidature pour l'écran de revue humaine.
@@ -272,11 +291,15 @@ Détail complet d'une candidature pour l'écran de revue humaine.
       "id": "res_default",
       "name": "CV_Lead_Frontend_2026.pdf"
     },
+    "availableResumes": [],
+    "customizedResumeContent": "Contenu texte du CV adapté, à vérifier par l'utilisateur.",
+    "customizedResumeConfirmed": false,
     "customizedHighlights": [
       "Mise en avant de l'expérience de 4 ans sur Vue 3 Composition API",
       "Ajout de projets d'automatisation et Node.js"
     ],
     "coverLetter": "Madame, Monsieur,\n\nAyant développé une solide expertise en architecture Vue 3 et Node.js...",
+    "coverLetterConfirmed": false,
     "preparedAnswers": [
       {
         "question": "Années d'expérience en Vue.js ?",
@@ -304,14 +327,29 @@ Détail complet d'une candidature pour l'écran de revue humaine.
 }
 ```
 
-#### `POST /applications/:id/prepare`
-Génère ou régénère la lettre de motivation, le CV adapté et les réponses préremplies via l'IA.
-
 #### `PATCH /applications/:id`
-Permet à l'utilisateur de modifier la lettre de motivation, valider les réponses et lever les bloquants.
+Permet de modifier la lettre, le CV adapté, les points forts, les réponses ou le CV sélectionné.
+
+#### `POST /applications/:id/select-resume`
+Sélectionne un CV source analysable puis régénère le matching, le CV adapté, la lettre, les réponses et les points à vérifier à partir de ce CV.
+
+#### `PATCH /applications/:id/prepared-answers/:answerIndex/confirm`
+Confirme explicitement une réponse après modification/vérification.
+
+#### `POST /applications/:id/regenerate-letter`
+Régénère la lettre de motivation avec des consignes optionnelles.
+
+#### `POST /applications/:id/suggest-blocker-answer`
+Propose une réponse qui reste à vérifier et confirmer par l'utilisateur.
+
+#### `POST /applications/:id/resolve-blocker`
+Enregistre une réponse humaine non vide pour résoudre un point bloquant.
 
 #### `POST /applications/:id/submit`
-Déclenche la soumission de la candidature (mode automatisé ou assistance guidée).
+Tente l'automatisation pour les pages HTTPS standards Greenhouse/Lever uniquement, si `match_score >= 90%`, readiness vaut 100, le CV adapté est sauvegardé et les bloqueurs/réponses sont tous résolus/confirmés. CAPTCHA, authentification, consentement/déclaration légale, champ obligatoire inconnu ou absence de confirmation explicite du site arrêtent l'automatisation et renvoient `manual_required` avec le lien.
+
+#### `POST /applications/:id/confirm-manual-submission`
+Enregistre une déclaration d'envoi manuel après confirmation utilisateur, seulement si readiness vaut 100. Cet endpoint ne contacte aucun site externe.
 
 ---
 
@@ -325,4 +363,3 @@ jober/
 ├── frontend/               # Vue 3, Vite, Pinia, Tailwind CSS
 └── backend/                # Node.js, TypeScript, Fastify, Zod, SQLite
 ```
-

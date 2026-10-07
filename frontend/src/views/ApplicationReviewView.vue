@@ -14,6 +14,8 @@ const route = useRoute();
 const appStore = useApplicationsStore();
 const blockerResponses = ref<Record<string, string>>({});
 const coverLetterDraft = ref('');
+const customizedResumeDraft = ref('');
+const preparedAnswerDrafts = ref<string[]>([]);
 const showRegenModal = ref(false);
 const copiedNotification = ref(false);
 
@@ -24,6 +26,9 @@ onMounted(async () => {
   await appStore.fetchApplication(applicationId.value);
   if (app.value) {
     coverLetterDraft.value = app.value.preparedData.coverLetter;
+    customizedResumeDraft.value = app.value.preparedData.customizedResumeContent;
+    preparedAnswerDrafts.value = app.value.preparedData.preparedAnswers
+      .map((answer) => answer.suggestedAnswer);
   }
 });
 
@@ -32,9 +37,19 @@ const unresolvedBlockers = computed(() => {
 });
 
 const canSubmit = computed(() => {
+  const preparedAnswersAreConfirmed = app.value?.preparedData.preparedAnswers.every(
+    (answer, index) => answer.isConfirmed &&
+      answer.suggestedAnswer === preparedAnswerDrafts.value[index]
+  ) ?? false;
   return Boolean(
     app.value &&
     unresolvedBlockers.value.length === 0 &&
+    app.value.readinessScore === 100 &&
+    app.value.preparedData.customizedResumeConfirmed &&
+    app.value.preparedData.coverLetterConfirmed &&
+    app.value.preparedData.customizedResumeContent === customizedResumeDraft.value &&
+    app.value.preparedData.coverLetter === coverLetterDraft.value &&
+    preparedAnswersAreConfirmed &&
     app.value.status !== 'submitted_manual' &&
     app.value.status !== 'submitted_auto'
   );
@@ -60,6 +75,40 @@ function updateBlockerResponses(responses: Record<string, string>) {
 
 async function handleSaveCoverLetter() {
   await appStore.updateCoverLetter(applicationId.value, coverLetterDraft.value);
+}
+
+async function handleConfirmCoverLetter() {
+  await appStore.updateCoverLetter(applicationId.value, coverLetterDraft.value);
+  if (!appStore.error) await appStore.confirmCoverLetter(applicationId.value);
+}
+
+async function handleSelectResume(resumeId: string) {
+  if (resumeId) {
+    await appStore.selectResume(applicationId.value, resumeId);
+    if (!appStore.error && appStore.currentApplication) {
+      customizedResumeDraft.value = appStore.currentApplication.preparedData.customizedResumeContent;
+      coverLetterDraft.value = appStore.currentApplication.preparedData.coverLetter;
+      preparedAnswerDrafts.value = appStore.currentApplication.preparedData.preparedAnswers
+        .map((answer) => answer.suggestedAnswer);
+    }
+  }
+}
+
+async function handleSaveCustomizedResume() {
+  await appStore.saveCustomizedResume(applicationId.value, customizedResumeDraft.value);
+}
+
+async function handleConfirmCustomizedResume() {
+  await appStore.saveCustomizedResume(applicationId.value, customizedResumeDraft.value);
+  if (!appStore.error) await appStore.confirmCustomizedResume(applicationId.value);
+}
+
+function handleUpdatePreparedAnswer(answerIndex: number, answer: string) {
+  preparedAnswerDrafts.value[answerIndex] = answer;
+}
+
+async function handleConfirmPreparedAnswer(answerIndex: number, answer: string) {
+  await appStore.confirmPreparedAnswer(applicationId.value, answerIndex, answer);
 }
 
 async function handleRegenerateCoverLetter(instructions: string, tone: string) {
@@ -100,6 +149,10 @@ ${application.preparedData.customizedHighlights.join('\n')}
 async function handleSubmitApplication() {
   await appStore.submitApplication(applicationId.value);
 }
+
+async function handleConfirmManualSubmission() {
+  await appStore.confirmManualSubmission(applicationId.value);
+}
 </script>
 
 <template>
@@ -118,6 +171,14 @@ async function handleSubmitApplication() {
     </div>
 
     <div v-else class="space-y-6">
+      <div
+        v-if="appStore.error"
+        role="alert"
+        class="bg-rose-500/10 border border-rose-500/30 rounded-xl p-4 text-rose-300 text-sm"
+      >
+        {{ appStore.error }}
+      </div>
+
       <ApplicationOverview
         :application="app"
         :success-message="appStore.successMessage"
@@ -127,17 +188,25 @@ async function handleSubmitApplication() {
         <ApplicationDecisionsSection
           :blockers="app.blockers"
           :prepared-answers="app.preparedData.preparedAnswers"
+          :prepared-answer-drafts="preparedAnswerDrafts"
           :responses="blockerResponses"
           :suggesting-answer="appStore.suggestingAnswer"
           @update-responses="updateBlockerResponses"
           @suggest-answer="handleSuggestBlockerAnswer"
           @resolve-blocker="handleResolveBlocker"
+          @update-answer="handleUpdatePreparedAnswer"
+          @confirm-answer="handleConfirmPreparedAnswer"
         />
         <ApplicationMaterialsSection
           v-model:cover-letter="coverLetterDraft"
           :prepared-data="app.preparedData"
+          v-model:customized-resume-content="customizedResumeDraft"
           @regenerate="showRegenModal = true"
           @save="handleSaveCoverLetter"
+          @confirm-cover-letter="handleConfirmCoverLetter"
+          @save-resume="handleSaveCustomizedResume"
+          @confirm-resume="handleConfirmCustomizedResume"
+          @select-resume="handleSelectResume"
         />
       </div>
 
@@ -145,7 +214,10 @@ async function handleSubmitApplication() {
         :can-submit="canSubmit"
         :unresolved-count="unresolvedBlockers.length"
         :submitting="appStore.submitting"
+        :manual-submission-url="appStore.manualSubmissionUrl"
+        :manual-submission-reason="appStore.manualSubmissionReason"
         @submit="handleSubmitApplication"
+        @submit-manual="handleConfirmManualSubmission"
       />
     </div>
 

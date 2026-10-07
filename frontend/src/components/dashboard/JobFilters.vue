@@ -52,6 +52,7 @@ const emit = defineEmits<{
           <option value="all">Tous les statuts</option>
           <option value="analyzed">Analysées</option>
           <option value="rejected">Non retenues</option>
+          <option value="expired">Expirées</option>
         </select>
       </div>
     </div>

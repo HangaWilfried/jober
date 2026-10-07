@@ -4,6 +4,7 @@ import multipart from '@fastify/multipart';
 import { profileRoutes } from './routes/profile.routes.js';
 import { jobRoutes } from './routes/jobs.routes.js';
 import { applicationRoutes } from './routes/applications.routes.js';
+import { startJobCollectionScheduler } from './services/collector/job-collection-scheduler.service.js';
 
 const fastify = Fastify({
   logger: {
@@ -55,6 +56,7 @@ const start = async () => {
     console.log(`\n🚀 Serveur Jober Backend démarré sur http://localhost:${PORT}`);
     console.log(`📋 API v1 disponible sur http://localhost:${PORT}/api/v1`);
     console.log(`🩺 Health check sur http://localhost:${PORT}/health\n`);
+    startJobCollectionScheduler(fastify.log);
   } catch (err) {
     fastify.log.error(err);
     process.exit(1);
@@ -62,4 +64,3 @@ const start = async () => {
 };
 
 start();
-

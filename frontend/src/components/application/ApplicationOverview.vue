@@ -34,7 +34,11 @@ defineProps<{
     >
       <CheckCircle class="w-5 h-5 flex-shrink-0" />
       <div>
-        <p class="font-semibold">{{ successMessage || 'Candidature transmise avec succès !' }}</p>
+        <p class="font-semibold">
+          {{ successMessage || (application.status === 'submitted_auto'
+            ? 'Candidature envoyée et confirmée par le site.'
+            : 'Candidature marquée comme envoyée manuellement.') }}
+        </p>
         <p class="text-xs">Statut : {{ application.status }} — Enregistré en base SQLite</p>
       </div>
     </div>

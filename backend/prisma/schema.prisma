@@ -45,7 +45,8 @@ model JobOffer {
   url         String
   source      String        // Welcome to the Jungle, LinkedIn, Indeed, etc.
   description String
-  publishedAt DateTime      @default(now())
+  publishedAt DateTime?
+  expiresAt   DateTime?
   status      String        @default("new")     // new, analyzed, shortlisted, rejected, archived
   analysis    JobAnalysis?
   application Application?
@@ -64,6 +65,7 @@ model JobAnalysis {
   matchingSkills     String   // Stocké en JSON
   missingSkills      String   // Stocké en JSON
   minExperienceYears Int      @default(0)
+  analysisMethod     String   @default("gemini")
   createdAt          DateTime @default(now())
   updatedAt          DateTime @updatedAt
 }
@@ -78,6 +80,10 @@ model Application {
   readinessScore       Int                  @default(0)
   selectedResumeId     String?
   coverLetter          String               @default("")
+  coverLetterConfirmed Boolean              @default(false)
+  customizedResumeContent String            @default("")
+  customizedResumeConfirmed Boolean         @default(false)
+  customizedResumePath String?
   preparedAnswers      String               @default("[]") // Stocké en JSON
   customizedHighlights String               @default("[]") // Stocké en JSON
   blockers             ApplicationBlocker[]
@@ -98,4 +104,3 @@ model ApplicationBlocker {
   createdAt     DateTime    @default(now())
   updatedAt     DateTime    @updatedAt
 }
-

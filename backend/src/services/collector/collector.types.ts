@@ -8,12 +8,17 @@ export interface RawJobItem {
   source: string;
   description: string;
   publishedAt?: Date;
+  expiresAt?: Date;
+  salaryMin?: number;
+  salaryCurrency?: string;
 }
 
 export interface CollectionResult {
   totalDiscovered: number;
   newOffersSaved: number;
   duplicatesSkipped: number;
+  expiredOffers: number;
+  incompleteOffers: number;
   filteredOut: number;
   highlyRelevantMatches: number;
   sources: string[];

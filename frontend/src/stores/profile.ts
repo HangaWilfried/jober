@@ -25,15 +25,18 @@ export const useProfileStore = defineStore('profile', () => {
 
   async function updateProfile(data: Partial<UserProfile>) {
     loading.value = true;
+    error.value = null;
+    successMessage.value = null;
     try {
       const res = await fetch('/api/v1/profile', {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(data)
       });
-      if (res.ok) {
-        profile.value = await res.json();
-      }
+      const response = await res.json();
+      if (!res.ok) throw new Error(response.error || 'Impossible de sauvegarder le profil.');
+      profile.value = response;
+      successMessage.value = 'Profil et préférences enregistrés.';
     } catch (err: any) {
       error.value = err.message;
     } finally {

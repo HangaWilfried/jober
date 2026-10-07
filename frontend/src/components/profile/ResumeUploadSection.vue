@@ -14,7 +14,7 @@ const fileInput = ref<HTMLInputElement | null>(null);
 const isDragging = ref(false);
 
 function uploadFile(file: File | undefined) {
-  if (file && (file.type === 'application/pdf' || file.name.endsWith('.pdf'))) {
+  if (file && /\.(pdf|txt)$/i.test(file.name)) {
     emit('upload', file);
   }
 }
@@ -34,7 +34,7 @@ function handleDrop(event: DragEvent) {
   <section class="bg-slate-900 border border-slate-800 rounded-xl p-6">
     <h2 class="text-base font-semibold text-white flex items-center gap-2 mb-3">
       <UploadCloud class="w-5 h-5 text-indigo-400" />
-      <span>Importer un nouveau CV (PDF)</span>
+      <span>Importer un nouveau CV (PDF ou texte)</span>
     </h2>
 
     <div
@@ -48,7 +48,7 @@ function handleDrop(event: DragEvent) {
       <input
         ref="fileInput"
         type="file"
-        accept="application/pdf"
+        accept="application/pdf,text/plain,.txt"
         class="hidden"
         @change="handleFileChange"
       />
@@ -63,9 +63,9 @@ function handleDrop(event: DragEvent) {
           <FileText class="w-6 h-6" />
         </div>
         <p class="text-sm font-semibold text-slate-200">
-          Glissez-déposez votre CV PDF ici, ou <span class="text-indigo-400 hover:underline">parcourez vos fichiers</span>
+          Glissez-déposez votre CV PDF ou texte ici, ou <span class="text-indigo-400 hover:underline">parcourez vos fichiers</span>
         </p>
-        <p class="text-xs text-slate-500">Format accepté : PDF (max 15 Mo) • Traitement 100% local</p>
+        <p class="text-xs text-slate-500">Formats acceptés : PDF avec texte ou .txt UTF-8 (max 15 Mo) • Traitement local</p>
       </div>
     </div>
   </section>

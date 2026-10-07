@@ -12,6 +12,7 @@ interface RemoteOKJob {
   description?: string;
   tags?: string[];
   date?: string;
+  salary_min?: string | number;
 }
 
 function isRemoteOKJob(value: unknown): value is RemoteOKJob {
@@ -175,7 +176,12 @@ export class FeedCollectorService {
         url,
         source: 'RemoteOK',
         description,
-        publishedAt: parsePublishedAt(job.date)
+        publishedAt: parsePublishedAt(job.date),
+        ...(typeof job.salary_min === 'number' && job.salary_min > 0
+          ? { salaryMin: job.salary_min }
+          : typeof job.salary_min === 'string' && Number(job.salary_min) > 0
+            ? { salaryMin: Number(job.salary_min) }
+            : {})
       });
     }
 

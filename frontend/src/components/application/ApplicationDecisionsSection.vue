@@ -1,10 +1,11 @@
 <script setup lang="ts">
 import type { ApplicationBlocker, PreparedAnswer } from '../../types';
-import { Loader2, MessageSquare, ShieldAlert, Wand2 } from 'lucide-vue-next';
+import { Check, Loader2, MessageSquare, ShieldAlert, Wand2 } from 'lucide-vue-next';
 
 defineProps<{
   blockers: ApplicationBlocker[];
   preparedAnswers: PreparedAnswer[];
+  preparedAnswerDrafts: string[];
   responses: Record<string, string>;
   suggestingAnswer: Record<string, boolean>;
 }>();
@@ -12,7 +13,9 @@ defineProps<{
 const emit = defineEmits<{
   updateResponses: [responses: Record<string, string>];
   suggestAnswer: [blockerId: string];
-  resolveBlocker: [blockerId: string];
+  resolveBlocker: [blockerId: string, response: string];
+  updateAnswer: [answerIndex: number, answer: string];
+  confirmAnswer: [answerIndex: number, answer: string];
 }>();
 </script>
 
@@ -75,10 +78,10 @@ const emit = defineEmits<{
             ></textarea>
 
             <button
-              @click="emit('resolveBlocker', blocker.id)"
+              @click="emit('resolveBlocker', blocker.id, responses[blocker.id] || '')"
               class="text-xs font-semibold px-3 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white transition-colors cursor-pointer"
             >
-              Valider cette réponse
+              Confirmer et résoudre
             </button>
           </div>
 
@@ -103,12 +106,28 @@ const emit = defineEmits<{
         >
           <div>
             <div class="text-xs text-slate-400 mb-1">{{ answer.question }}</div>
-            <div class="text-sm font-semibold text-white">{{ answer.suggestedAnswer }}</div>
+            <textarea
+              :value="preparedAnswerDrafts[index] ?? answer.suggestedAnswer"
+              @input="emit('updateAnswer', index, ($event.target as HTMLTextAreaElement).value)"
+              rows="2"
+              :aria-label="`Réponse proposée : ${answer.question}`"
+              class="w-full bg-slate-900 border border-slate-700 rounded-lg p-2 text-sm text-white focus:outline-none focus:border-indigo-500"
+            ></textarea>
           </div>
           <div class="flex items-center gap-2">
             <span class="text-[10px] px-2 py-0.5 rounded bg-slate-800 text-slate-400 font-mono">
               Confiance : {{ Math.round(answer.confidence * 100) }}%
             </span>
+            <button
+              v-if="!answer.isConfirmed"
+              type="button"
+              @click="emit('confirmAnswer', index, preparedAnswerDrafts[index] ?? answer.suggestedAnswer)"
+              class="inline-flex items-center gap-1 px-2 py-1 text-[10px] rounded bg-indigo-500/10 text-indigo-300 hover:bg-indigo-500/20"
+            >
+              <Check class="w-3 h-3" />
+              Confirmer
+            </button>
+            <span v-else class="text-[10px] text-emerald-300">Confirmée</span>
           </div>
         </div>
       </div>

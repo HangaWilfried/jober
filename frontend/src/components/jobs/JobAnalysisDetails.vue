@@ -8,6 +8,12 @@ defineProps<{
 
 <template>
   <div>
+    <p
+      class="text-[11px] mb-2"
+      :class="analysis.analysisMethod === 'gemini' ? 'text-indigo-300' : 'text-amber-300'"
+    >
+      {{ analysis.analysisMethod === 'gemini' ? 'Analyse Gemini' : 'Estimation locale heuristique — à vérifier' }}
+    </p>
     <p v-if="analysis.summary" class="text-xs text-slate-300 bg-slate-800/60 rounded-lg p-3 mb-4 border border-slate-700/50 leading-relaxed">
       {{ analysis.summary }}
     </p>
